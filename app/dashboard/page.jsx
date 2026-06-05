@@ -1,14 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-// Supabase embeds can come back as an object or a single-item array
-// depending on how it reads the relationship; normalise to one record.
-function one<T>(v: T | T[] | null | undefined): T | null {
+function one(v) {
   if (Array.isArray(v)) return v[0] ?? null;
   return v ?? null;
 }
 
-const STATUS_LABEL: Record<string, string> = {
+const STATUS_LABEL = {
   submitted: "Submitted",
   booked: "Booked",
   scanned: "Scanned",
@@ -34,7 +32,6 @@ export default async function DashboardPage() {
   const role = profile?.role || "dentist";
   const email = profile?.email || claims.email || "";
 
-  // RLS automatically limits this to the dentist's own practice.
   const { data: referrals } = await supabase
     .from("referrals")
     .select(
@@ -43,20 +40,20 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false })
     .limit(50);
 
-  const rows = (referrals || []).map((r: any) => {
-    const pat = one<{ first_name: string; last_name: string }>(r.patients);
-    const st = one<{ name: string }>(r.scan_types);
+  const rows = (referrals || []).map((r) => {
+    const pat = one(r.patients);
+    const st = one(r.scan_types);
     return {
-      id: r.id as string,
-      status: r.status as string,
+      id: r.id,
+      status: r.status,
       reportRequested: !!r.report_requested,
-      created: r.created_at as string,
+      created: r.created_at,
       patientName: pat ? `${pat.first_name} ${pat.last_name}` : "—",
       scanType: st?.name || "—",
     };
   });
 
-  const fmtDate = (iso: string) =>
+  const fmtDate = (iso) =>
     new Date(iso).toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "short",
