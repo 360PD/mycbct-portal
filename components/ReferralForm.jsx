@@ -29,6 +29,11 @@ const PREGNANCY = [
   { v: "not_applicable", label: "N/A" },
 ];
 
+const ARCH = [
+  { v: "upper", label: "Upper jaw" },
+  { v: "lower", label: "Lower jaw" },
+];
+
 const money = (pence) =>
   typeof pence === "number"
     ? new Intl.NumberFormat("en-GB", {
@@ -54,6 +59,7 @@ export default function ReferralForm({
     sex: "",
     pregnancy: "",
     scanTypeId: "",
+    arch: "", // single-jaw only: "upper" | "lower"
     regionOfInterest: "",
     clinicalNotes: "",
     reportChoice: "", // "self" | "arrange"
@@ -80,6 +86,7 @@ export default function ReferralForm({
     if (!f.sex) e.sex = 1;
     if (!f.pregnancy) e.pregnancy = 1;
     if (!f.scanTypeId) e.scanTypeId = 1;
+    if (chosenScan && chosenScan.code === "single_jaw" && !f.arch) e.arch = 1;
     if (!f.regionOfInterest.trim()) e.regionOfInterest = 1;
     if (!f.clinicalNotes.trim()) e.clinicalNotes = 1;
     if (!f.reportChoice) e.reportChoice = 1;
@@ -95,6 +102,14 @@ export default function ReferralForm({
       return;
     }
     setSubmitting(true);
+
+    // For a single-arch scan, record which jaw at the top of the notes.
+    let notes = f.clinicalNotes.trim();
+    if (chosenScan && chosenScan.code === "single_jaw" && f.arch) {
+      const archLabel = f.arch === "upper" ? "Upper jaw" : "Lower jaw";
+      notes = `Arch: ${archLabel}.` + (notes ? `\n\n${notes}` : "");
+    }
+
     try {
       const res = await createReferral({
         firstName: f.firstName,
@@ -104,7 +119,7 @@ export default function ReferralForm({
         pregnancy: f.pregnancy,
         scanTypeId: f.scanTypeId,
         regionOfInterest: f.regionOfInterest,
-        clinicalNotes: f.clinicalNotes,
+        clinicalNotes: notes,
         reportRequested: f.reportChoice === "arrange",
         signatureName: f.signatureName,
       });
@@ -137,6 +152,7 @@ export default function ReferralForm({
       sex: "",
       pregnancy: "",
       scanTypeId: "",
+      arch: "",
       regionOfInterest: "",
       clinicalNotes: "",
       reportChoice: "",
@@ -293,6 +309,7 @@ export default function ReferralForm({
                       className={"rf-choice " + (f.scanTypeId === s.id ? "on" : "")}
                       onClick={() => {
                         set("scanTypeId", s.id);
+                        if (s.code !== "single_jaw") set("arch", "");
                         if (s.code === "ios" && f.reportChoice === "arrange") {
                           set("reportChoice", "");
                         }
@@ -305,6 +322,24 @@ export default function ReferralForm({
                   ))}
                 </div>
               </div>
+
+              {chosenScan && chosenScan.code === "single_jaw" && (
+                <div className="rf-field">
+                  <label>Which arch? *</label>
+                  <div className={"rf-seg " + (errors.arch ? "err" : "")}>
+                    {ARCH.map((a) => (
+                      <button
+                        key={a.v}
+                        type="button"
+                        className={f.arch === a.v ? "on" : ""}
+                        onClick={() => set("arch", a.v)}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="rf-field">
                 <label>Region of interest *</label>
