@@ -17,7 +17,7 @@ export default async function ReferPage() {
     .eq("id", claims.sub)
     .single();
 
-  let practiceName: string | null = null;
+  let practiceName = null;
   if (profile?.practice_id) {
     const { data: practice } = await supabase
       .from("practices")
