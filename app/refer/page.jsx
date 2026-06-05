@@ -32,6 +32,7 @@ export default async function ReferPage() {
     .select("id, code, name, description, base_price")
     .eq("active", true)
     .eq("is_addon", false)
+    .neq("code", "ios")
     .order("sort_order");
 
   return (
