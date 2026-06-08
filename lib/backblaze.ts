@@ -6,17 +6,25 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+// Read an env var and strip any stray whitespace/newlines that can sneak in
+// when pasting values into a hosting dashboard. A trailing newline in the key
+// id or region otherwise breaks the signed Authorization header.
+function env(name: string) {
+  const v = process.env[name];
+  return v ? v.trim() : v;
+}
+
 // Backblaze B2 is S3-compatible. These are SERVER-ONLY env vars (never NEXT_PUBLIC).
-export const B2_BUCKET = process.env.B2_BUCKET as string;
+export const B2_BUCKET = env("B2_BUCKET") as string;
 
 function client() {
   return new S3Client({
-    region: process.env.B2_REGION,
-    endpoint: process.env.B2_ENDPOINT,
+    region: env("B2_REGION"),
+    endpoint: env("B2_ENDPOINT"),
     forcePathStyle: true,
     credentials: {
-      accessKeyId: process.env.B2_KEY_ID as string,
-      secretAccessKey: process.env.B2_APP_KEY as string,
+      accessKeyId: env("B2_KEY_ID") as string,
+      secretAccessKey: env("B2_APP_KEY") as string,
     },
   });
 }
