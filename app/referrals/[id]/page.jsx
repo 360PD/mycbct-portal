@@ -145,7 +145,11 @@ export default async function ReferralDetailPage({ params }) {
           <h2 className="rd-h2">Scans</h2>
 
           {scanList.length === 0 ? (
-            <p className="rd-empty">No scans uploaded yet.</p>
+            <p className="rd-empty">
+              {canUpload
+                ? "No scans uploaded yet."
+                : "Your scan isn't ready yet. It will appear here as soon as we've completed it."}
+            </p>
           ) : (
             <ul className="rd-scans">
               {scanList.map((s) => (
