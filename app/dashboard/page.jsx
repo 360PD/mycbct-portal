@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
+// Supabase embeds can come back as an object or a single-item array
+// depending on how it reads the relationship; normalise to one record.
 function one(v) {
   if (Array.isArray(v)) return v[0] ?? null;
   return v ?? null;
@@ -32,6 +34,7 @@ export default async function DashboardPage() {
   const role = profile?.role || "dentist";
   const email = profile?.email || claims.email || "";
 
+  // RLS automatically limits this to the dentist's own practice.
   const { data: referrals } = await supabase
     .from("referrals")
     .select(
@@ -89,6 +92,8 @@ export default async function DashboardPage() {
         .db-row{display:grid;grid-template-columns:1.4fr 1fr .9fr .8fr;gap:12px;align-items:center;
           padding:16px 20px;border-bottom:1px solid rgba(247,244,236,.07);font-size:15px;}
         .db-row:last-child{border-bottom:none;}
+        a.db-row{color:inherit;text-decoration:none;cursor:pointer;transition:background .12s ease;}
+        a.db-row:hover{background:rgba(247,244,236,.05);}
         .db-row.head{background:rgba(247,244,236,.04);font-size:12px;letter-spacing:.12em;
           text-transform:uppercase;color:rgba(247,244,236,.5);font-weight:600;}
         .db-pat{font-weight:600;}
@@ -134,7 +139,7 @@ export default async function DashboardPage() {
               <span className="db-when">Referred</span>
             </div>
             {rows.map((r) => (
-              <div className="db-row" key={r.id}>
+              <a className="db-row" key={r.id} href={"/referrals/" + r.id}>
                 <span>
                   <span className="db-pat">{r.patientName}</span>
                   {r.reportRequested && <span className="db-sub"> &middot; report requested</span>}
@@ -146,7 +151,7 @@ export default async function DashboardPage() {
                   </span>
                 </span>
                 <span className="db-when db-sub">{fmtDate(r.created)}</span>
-              </div>
+              </a>
             ))}
           </div>
         )}
