@@ -1,0 +1,687 @@
+"""
+Database access for the worker.
+
+The worker reads and writes one table: `scans`. It expects these columns
+(the preview_* ones are added by migrations/0006_scan_previews.sql):
+
+    id                    primary key
+    storage_key           text  -- Backblaze object key of the ORIGINAL scan zip
+    preview_status        text  -- none | pending | processing | ready | failed
+    preview_manifest_key  text
+    preview_frame_count   integer
+    preview_error         text
+    preview_attempts      integer
+    preview_updated_at    timestamptz
+
+If your original-file column is NOT called "storage_key", change KEY_COLUMN
+below to match. That is the only line you need to touch.
+"""
+
+import psycopg
+
+import config
+
+# The column on `scans` holding the Backblaze object key of the original scan.
+KEY_COLUMN = "storage_key"
+
+
+def _connect():
+    return psycopg.connect(config.DATABASE_URL, autocommit=False)
+
+
+def claim_next_scan():
+    """
+    Atomically grab one pending scan and mark it 'processing'.
+
+    Uses FOR UPDATE SKIP LOCKED so that even if two workers ever run at once,
+    they can never grab the same scan.
+
+    Returns (scan_id, storage_key, attempts) or None if nothing is waiting.
+    """
+    sql = f"""
+        UPDATE scans
+        SET preview_status = 'processing',
+            preview_attempts = preview_attempts + 1,
+            preview_updated_at = now()
+        WHERE id = (
+            SELECT id FROM scans
+            WHERE preview_status = 'pending'
+            ORDER BY uploaded_at
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+        )
+        RETURNING id, {KEY_COLUMN}, preview_attempts;
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            row = cur.fetchone()
+            conn.commit()
+            return row
+
+
+def mark_ready(scan_id, manifest_key, frame_count):
+    sql = """
+        UPDATE scans
+        SET preview_status = 'ready',
+            preview_manifest_key = %s,
+            preview_frame_count = %s,
+            preview_error = NULL,
+            preview_updated_at = now()
+        WHERE id = %s;
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (manifest_key, frame_count, scan_id))
+            conn.commit()
+
+
+def mark_retry(scan_id, error):
+    """Put the scan back to 'pending' so the loop tries again later."""
+    sql = """
+        UPDATE scans
+        SET preview_status = 'pending',
+            preview_error = %s,
+            preview_updated_at = now()
+        WHERE id = %s;
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (error, scan_id))
+            conn.commit()
+
+
+def mark_failed(scan_id, error):
+    """Give up on this scan. The viewer will fall back to Download."""
+    sql = """
+        UPDATE scans
+        SET preview_status = 'failed',
+            preview_error = %s,
+            preview_updated_at = now()
+        WHERE id = %s;
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (error, scan_id))
+            conn.commit()
+
+# MyCBCT — scan preview worker
+
+This is the small background program that turns an uploaded scan into the
+quick-look preview a dentist sees in the portal. It runs on its own (on
+Railway), not inside the website. Your team's only job stays: **upload a scan
+once.** This does the rest, automatically.
+
+You do **not** need to understand the Python to run it. Follow the steps below.
+
+---
+
+## What it does, in one line
+
+Watches for a scan marked "pending" → makes ~60 small images for each of the
+three views (axial, coronal, sagittal) → stores them next to the original in
+Backblaze → marks the scan "ready".
+
+---
+
+## One-time setup
+
+### Step 1 — Add the database columns
+
+In Supabase, open **SQL Editor**, paste the contents of
+`migrations/0006_scan_previews.sql`, and press **Run**. It's safe to run more
+than once. This gives the worker the columns it reads and writes.
+
+### Step 2 — Put this code on GitHub
+
+Create a new repository (e.g. `360PD/mycbct-preview-worker`) and upload this
+whole `worker` folder to it through the GitHub website. No command line needed.
+
+### Step 3 — Create the service on Railway
+
+1. Go to railway.app and sign in with GitHub.
+2. **New Project → Deploy from GitHub repo** → pick the repo you just made.
+3. Railway sees the `Dockerfile` and builds it. Let it finish.
+
+### Step 4 — Add the settings (Variables)
+
+In the Railway service, open the **Variables** tab and add each line from
+`.env.example`, with your real values. The four that must be correct:
+
+- **DATABASE_URL** — Supabase → Project Settings → Database → Connection string → URI
+  (put your database password where it says `[PASSWORD]`).
+- **B2_ENDPOINT** — shown on your Backblaze bucket page (looks like
+  `https://s3.eu-central-003.backblazeb2.com`).
+- **B2_KEY_ID** and **B2_APP_KEY** — Backblaze → Application Keys.
+- **B2_BUCKET** — the exact name of the bucket your scans live in.
+
+The rest (recipe + behaviour) already have sensible defaults; leave them unless
+you want to change something.
+
+### Step 5 — Give it enough memory
+
+In Railway service **Settings**, set memory to about **2 GB**. Big scans need
+room to work. Then **Redeploy**.
+
+That's it. The worker is now awake and watching.
+
+---
+
+## How to check it's working
+
+- In Railway, open the service **Logs**. On start you'll see:
+  `Preview worker started. Watching for pending scans…`
+- To test end to end: in Supabase SQL Editor, take one real scan and set it
+  going:
+  ```sql
+  UPDATE scans SET preview_status = 'pending' WHERE id = 'the-scan-id';
+  ```
+  Within a few seconds the logs should show it downloading, building, and
+  uploading, then the scan's `preview_status` becomes `ready`.
+
+---
+
+## How a scan flows
+
+`none` → `pending` → `processing` → `ready`  (or `failed` if it can't be done)
+
+- **none** — default; nothing happens. Historical scans sit here until you
+  choose to backfill them.
+- **pending** — queued. Your app should set this when a new scan is uploaded.
+- **processing** — the worker is on it.
+- **ready** — preview frames are in Backblaze; the viewer can show them.
+- **failed** — tried `MAX_ATTEMPTS` times and gave up. The dentist can still
+  Download the original — a failed preview never blocks the real scan.
+
+---
+
+## Where previews are stored
+
+Next to the original, inside the same bucket:
+
+```
+previews/<scan_id>/manifest.json      <- index the viewer reads
+previews/<scan_id>/axial/000.jpg ...
+previews/<scan_id>/coronal/000.jpg ...
+previews/<scan_id>/sagittal/000.jpg ...
+```
+
+Roughly 7 MB per scan.
+
+---
+
+## Two things to know
+
+- **Your original-file column.** The worker reads the original scan's Backblaze
+  key from `scans.storage_key`. If your column has a different name, open
+  `db.py` and change the one line `KEY_COLUMN = "storage_key"` to match. That's
+  the only change.
+- **New uploads must be marked pending.** When the app finishes uploading a new
+  scan and inserts its row, set `preview_status = 'pending'`. That's the signal
+  that tells this worker to make the preview.
+
+---
+
+## If something looks wrong
+
+- **Logs say "Missing required environment variable"** — a Variable is missing
+  or misspelled in Railway. Check against `.env.example`.
+- **A scan went to `failed`** — look at its `preview_error` column in Supabase
+  for the reason, and the Railway logs for the full detail.
+- **Out of memory on big scans** — raise the Railway memory (Settings) and
+  redeploy.
+
+---
+
+## The files
+
+- `worker.py` — the loop: claim a scan, process it, update status, repeat.
+- `dicom_to_frames.py` — the imaging: read the scan, make the frames + manifest.
+- `storage.py` — download original / upload previews (Backblaze).
+- `db.py` — claim a pending scan and update its status (Supabase).
+- `config.py` — reads all settings from the Variables.
+- `migrations/0006_scan_previews.sql` — the database columns (Step 1).
+- `Dockerfile` — tells Railway how to build it.
+- `.env.example` — the list of Variables to set.
+
+"""
+Configuration for the preview worker.
+
+Everything is read from environment variables so nothing secret lives in the
+code. On Railway you set these under the service's "Variables" tab.
+See .env.example for the full list and where to find each value.
+"""
+
+import os
+
+
+def _required(name):
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(
+            f"Missing required environment variable: {name}. "
+            f"Set it in Railway under Variables (see .env.example)."
+        )
+    return value
+
+
+# --- Database (Supabase Postgres) ---------------------------------------
+# Supabase → Project Settings → Database → Connection string → URI
+DATABASE_URL = _required("DATABASE_URL")
+
+# --- Backblaze B2 (S3-compatible) ---------------------------------------
+B2_ENDPOINT = _required("B2_ENDPOINT")   # e.g. https://s3.eu-central-003.backblazeb2.com
+B2_KEY_ID = _required("B2_KEY_ID")
+B2_APP_KEY = _required("B2_APP_KEY")
+B2_BUCKET = _required("B2_BUCKET")
+
+# --- Preview recipe (sensible defaults; override via env if ever needed) -
+TARGET_SLICES = int(os.environ.get("TARGET_SLICES", "60"))
+LONGEST_EDGE = int(os.environ.get("LONGEST_EDGE", "512"))
+JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "80"))
+
+# --- Worker behaviour ---------------------------------------------------
+POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "5"))
+MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "3"))
+
+# Folder inside the bucket where previews are stored, beside the originals.
+PREVIEW_PREFIX = os.environ.get("PREVIEW_PREFIX", "previews")
+
+"""
+The graft: turn one DICOM scan into preview frames.
+
+Steps:
+  1. Unzip the scan.
+  2. Read all DICOM image files and assemble the biggest series into one 3D block.
+  3. Normalise brightness onto a sensible window (uses the scan's own window if
+     present, otherwise a robust percentile stretch).
+  4. For each view (axial, coronal, sagittal): sample ~TARGET_SLICES slices
+     evenly through the depth, resize so the longest physical edge is
+     ~LONGEST_EDGE px (this keeps coronal/sagittal from looking squashed),
+     and save as greyscale JPEG.
+  5. Write a small manifest.json that lists every frame, so the viewer knows
+     what to load.
+
+Real scans vary, so this handles the two common shapes: a folder of single-frame
+slices, and a single multi-frame DICOM file.
+"""
+
+import json
+import os
+import zipfile
+
+import numpy as np
+import pydicom
+from pydicom.pixel_data_handlers.util import apply_modality_lut
+from PIL import Image
+
+import config
+
+
+def unzip(zip_path, dest_dir):
+    os.makedirs(dest_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(dest_dir)
+    return dest_dir
+
+
+def _read_datasets(dicom_dir):
+    """Read every readable DICOM image file under a directory."""
+    datasets = []
+    for root, _, names in os.walk(dicom_dir):
+        for name in names:
+            path = os.path.join(root, name)
+            try:
+                ds = pydicom.dcmread(path, force=True)
+            except Exception:
+                continue  # not a DICOM file (e.g. DICOMDIR, readme) — skip
+            if "PixelData" not in ds:
+                continue
+            datasets.append(ds)
+    if not datasets:
+        raise ValueError("No DICOM image files found in scan")
+    return datasets
+
+
+def _largest_series(datasets):
+    """A scan zip can hold more than one series. Pick the one with most frames."""
+    series = {}
+    for ds in datasets:
+        uid = getattr(ds, "SeriesInstanceUID", "unknown")
+        series.setdefault(uid, []).append(ds)
+
+    def total_frames(items):
+        return sum(int(getattr(d, "NumberOfFrames", 1)) for d in items)
+
+    return series[max(series, key=lambda uid: total_frames(series[uid]))]
+
+
+def _slice_sort_key(ds):
+    """Sort slices by position along the slice normal; fall back to instance no."""
+    try:
+        iop = [float(x) for x in ds.ImageOrientationPatient]
+        ipp = [float(x) for x in ds.ImagePositionPatient]
+        row = np.array(iop[:3])
+        col = np.array(iop[3:])
+        normal = np.cross(row, col)
+        return float(np.dot(np.array(ipp), normal))
+    except Exception:
+        return float(getattr(ds, "InstanceNumber", 0) or 0)
+
+
+def _window(volume, ds):
+    """
+    Map raw DICOM values to 0-255 greyscale.
+
+    Applies the rescale slope/intercept, then windows: uses the scan's own
+    WindowCenter/Width if present, otherwise a robust 0.5-99.5 percentile
+    stretch so every scan comes out looking consistent without hand-tuning.
+    """
+    vol = volume.astype(np.float32)
+    try:
+        vol = apply_modality_lut(vol, ds).astype(np.float32)
+    except Exception:
+        slope = float(getattr(ds, "RescaleSlope", 1) or 1)
+        intercept = float(getattr(ds, "RescaleIntercept", 0) or 0)
+        vol = vol * slope + intercept
+
+    wc = getattr(ds, "WindowCenter", None)
+    ww = getattr(ds, "WindowWidth", None)
+    if wc is not None and ww is not None:
+        if isinstance(wc, pydicom.multival.MultiValue):
+            wc = wc[0]
+        if isinstance(ww, pydicom.multival.MultiValue):
+            ww = ww[0]
+        center = float(wc)
+        width = float(ww)
+        low = center - width / 2.0
+        high = center + width / 2.0
+    else:
+        low = float(np.percentile(vol, 0.5))
+        high = float(np.percentile(vol, 99.5))
+
+    if high <= low:
+        low = float(vol.min())
+        high = float(vol.max()) or (low + 1.0)
+
+    scaled = np.clip((vol - low) / (high - low), 0.0, 1.0) * 255.0
+    return scaled.astype(np.uint8), (low, high)
+
+
+def load_volume(dicom_dir):
+    """
+    Return (volume, spacing, window) where:
+      volume  : uint8 array shaped (Z, rows, cols)
+      spacing : (slice_mm, row_mm, col_mm) in millimetres
+      window  : (low, high) raw values used for brightness
+    """
+    datasets = _read_datasets(dicom_dir)
+    chosen = _largest_series(datasets)
+
+    multiframe = [d for d in chosen if int(getattr(d, "NumberOfFrames", 1)) > 1]
+    if multiframe:
+        ds = multiframe[0]
+        raw = ds.pixel_array.astype(np.float32)  # (frames, rows, cols)
+        pixel_spacing = getattr(ds, "PixelSpacing", [1.0, 1.0])
+        row_mm = float(pixel_spacing[0])
+        col_mm = float(pixel_spacing[1])
+        slice_mm = float(
+            getattr(ds, "SpacingBetweenSlices", getattr(ds, "SliceThickness", 1.0)) or 1.0
+        )
+        volume, window = _window(raw, ds)
+        return volume, (slice_mm, row_mm, col_mm), window
+
+    slices = [d for d in chosen if int(getattr(d, "NumberOfFrames", 1)) == 1]
+    slices.sort(key=_slice_sort_key)
+    raw = np.stack([s.pixel_array.astype(np.float32) for s in slices], axis=0)
+
+    ref = slices[0]
+    pixel_spacing = getattr(ref, "PixelSpacing", [1.0, 1.0])
+    row_mm = float(pixel_spacing[0])
+    col_mm = float(pixel_spacing[1])
+    slice_mm = float(
+        getattr(ref, "SpacingBetweenSlices", getattr(ref, "SliceThickness", 1.0)) or 1.0
+    )
+    # Prefer the real gap between the first two slice positions, if we can.
+    if len(slices) > 1:
+        gap = abs(_slice_sort_key(slices[1]) - _slice_sort_key(slices[0]))
+        if gap > 0:
+            slice_mm = gap
+
+    volume, window = _window(raw, ref)
+    return volume, (slice_mm, row_mm, col_mm), window
+
+
+def _sample(count, target):
+    """Pick `target` indices spread evenly across `count`. Take all if fewer."""
+    if count <= target:
+        return list(range(count))
+    return [int(round(i)) for i in np.linspace(0, count - 1, target)]
+
+
+def _render(slice_2d, row_mm, col_mm):
+    """Resize a 2D slice so its longest PHYSICAL edge is ~LONGEST_EDGE px."""
+    rows, cols = slice_2d.shape
+    height_mm = rows * row_mm
+    width_mm = cols * col_mm
+    longest_mm = max(height_mm, width_mm) or 1.0
+    scale = config.LONGEST_EDGE / longest_mm
+    out_h = max(1, int(round(height_mm * scale)))
+    out_w = max(1, int(round(width_mm * scale)))
+    img = Image.fromarray(slice_2d, mode="L")
+    return img.resize((out_w, out_h), Image.BILINEAR)
+
+
+def render_all(volume, spacing, out_dir):
+    """Render all three views to JPEGs. Returns (manifest_planes, total_frames)."""
+    slice_mm, row_mm, col_mm = spacing
+    depth, rows, cols = volume.shape
+
+    # name -> (slice count, getter(i) -> 2D slice, this slice's row_mm, col_mm)
+    plane_defs = {
+        "axial": (depth, lambda i: volume[i, :, :], row_mm, col_mm),
+        "coronal": (rows, lambda i: volume[:, i, :], slice_mm, col_mm),
+        "sagittal": (cols, lambda i: volume[:, :, i], slice_mm, row_mm),
+    }
+
+    manifest_planes = {}
+    total = 0
+    for name, (count, getter, r_mm, c_mm) in plane_defs.items():
+        plane_dir = os.path.join(out_dir, name)
+        os.makedirs(plane_dir, exist_ok=True)
+        frames = []
+        width = height = 0
+        for position, index in enumerate(_sample(count, config.TARGET_SLICES)):
+            slice_2d = np.ascontiguousarray(getter(index))
+            img = _render(slice_2d, r_mm, c_mm)
+            width, height = img.size
+            filename = f"{position:03d}.jpg"
+            img.save(
+                os.path.join(plane_dir, filename),
+                "JPEG",
+                quality=config.JPEG_QUALITY,
+            )
+            frames.append(f"{name}/{filename}")
+        manifest_planes[name] = {
+            "count": len(frames),
+            "frames": frames,
+            "width": width,
+            "height": height,
+        }
+        total += len(frames)
+
+    return manifest_planes, total
+
+
+def build_previews(zip_path, work_dir, scan_id):
+    """
+    Full job for one scan. Produces an output folder containing the three view
+    folders plus manifest.json. Returns (out_dir, manifest, total_frames).
+    """
+    dicom_dir = unzip(zip_path, os.path.join(work_dir, "dcm"))
+    volume, spacing, window = load_volume(dicom_dir)
+
+    out_dir = os.path.join(work_dir, "out")
+    os.makedirs(out_dir, exist_ok=True)
+
+    planes, total = render_all(volume, spacing, out_dir)
+
+    manifest = {
+        "version": 1,
+        "scan_id": str(scan_id),
+        "window": {"low": window[0], "high": window[1]},
+        "planes": planes,
+    }
+    with open(os.path.join(out_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f)
+
+    return out_dir, manifest, total
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies first (faster rebuilds when only code changes).
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the worker code.
+COPY . .
+
+# Start the background worker.
+CMD ["python", "worker.py"]
+
+pydicom==2.4.4
+numpy==1.26.4
+Pillow==10.4.0
+boto3==1.34.131
+psycopg[binary]==3.2.1
+
+"""
+Backblaze B2 storage, through its S3-compatible API (so we use boto3).
+
+Download the original scan; upload the generated preview frames + manifest.
+The worker only ever READS the original and WRITES new files beside it.
+"""
+
+import os
+
+import boto3
+from botocore.config import Config
+
+import config
+
+_s3 = boto3.session.Session().client(
+    "s3",
+    endpoint_url=config.B2_ENDPOINT,
+    aws_access_key_id=config.B2_KEY_ID,
+    aws_secret_access_key=config.B2_APP_KEY,
+    config=Config(signature_version="s3v4"),
+)
+
+
+def download(key, local_path):
+    """Download one object from the bucket to a local file."""
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    _s3.download_file(config.B2_BUCKET, key, local_path)
+
+
+def upload_file(local_path, key, content_type):
+    """Upload one local file to the bucket under `key`."""
+    _s3.upload_file(
+        local_path,
+        config.B2_BUCKET,
+        key,
+        ExtraArgs={"ContentType": content_type},
+    )
+
+"""
+The worker loop.
+
+Watches the database for a scan marked 'pending', processes it into preview
+frames, uploads them next to the original in Backblaze, and flips the scan to
+'ready'. If anything goes wrong it retries a couple of times, then marks the
+scan 'failed' (the viewer falls back to Download).
+
+Run with:  python worker.py
+"""
+
+import os
+import shutil
+import tempfile
+import time
+import traceback
+
+import config
+import db
+import dicom_to_frames as d2f
+import storage
+
+
+def _preview_key(scan_id, relative):
+    """Where a preview file lives in the bucket: previews/<scan_id>/<relative>."""
+    return f"{config.PREVIEW_PREFIX}/{scan_id}/{relative}"
+
+
+def process(scan_id, storage_key):
+    """Build and upload previews for one scan."""
+    work_dir = tempfile.mkdtemp(prefix=f"scan_{scan_id}_")
+    try:
+        zip_path = os.path.join(work_dir, "original.zip")
+        print(f"[{scan_id}] downloading original: {storage_key}")
+        storage.download(storage_key, zip_path)
+
+        print(f"[{scan_id}] building previews")
+        out_dir, _manifest, total = d2f.build_previews(zip_path, work_dir, scan_id)
+
+        print(f"[{scan_id}] uploading {total} frames + manifest")
+        for root, _, names in os.walk(out_dir):
+            for name in names:
+                local = os.path.join(root, name)
+                relative = os.path.relpath(local, out_dir).replace(os.sep, "/")
+                content_type = "application/json" if name.endswith(".json") else "image/jpeg"
+                storage.upload_file(local, _preview_key(scan_id, relative), content_type)
+
+        manifest_key = _preview_key(scan_id, "manifest.json")
+        db.mark_ready(scan_id, manifest_key, total)
+        print(f"[{scan_id}] done — preview ready ({total} frames)")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def run_once():
+    """Process one scan if any is waiting. Returns True if it did work."""
+    row = db.claim_next_scan()
+    if not row:
+        return False
+
+    scan_id, storage_key, attempts = row
+    try:
+        process(scan_id, storage_key)
+    except Exception as exc:
+        error = f"{exc.__class__.__name__}: {exc}"[:1000]
+        traceback.print_exc()
+        if attempts >= config.MAX_ATTEMPTS:
+            db.mark_failed(scan_id, error)
+            print(f"[{scan_id}] FAILED after {attempts} attempt(s)")
+        else:
+            db.mark_retry(scan_id, error)
+            print(f"[{scan_id}] will retry later (attempt {attempts})")
+    return True
+
+
+def main():
+    print("Preview worker started. Watching for pending scans…")
+    while True:
+        try:
+            did_work = run_once()
+        except Exception:
+            # Never let the loop die — log and keep watching.
+            traceback.print_exc()
+            did_work = False
+        if not did_work:
+            time.sleep(config.POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    main()
