@@ -12,6 +12,14 @@ export default function ScanViewer({ scanId }) {
   const [active, setActive] = useState("axial");
   const [index, setIndex] = useState(0);
 
+  // Which frames of the ACTIVE plane have finished downloading (loaded) or
+  // failed (errored), and which frame is actually on screen (shownIndex).
+  // We only ever display a fully-loaded frame, and hold the previous one until
+  // the next is ready — so scrubbing never flashes blank.
+  const [loaded, setLoaded] = useState(() => new Set());
+  const [errored, setErrored] = useState(() => new Set());
+  const [shownIndex, setShownIndex] = useState(0);
+
   const stageRef = useRef(null);
   const countRef = useRef(0);
 
@@ -34,6 +42,7 @@ export default function ScanViewer({ scanId }) {
         setPlanes(got);
         setActive(first);
         setIndex(0);
+        setShownIndex(0);
         setLoading(false);
       })
       .catch(() => {
@@ -52,18 +61,57 @@ export default function ScanViewer({ scanId }) {
   const count = frames.length;
   countRef.current = count;
 
-  // Preload the active plane's frames so scrubbing is smooth.
+  // When the active plane changes, download every frame in the background and
+  // mark each as loaded (or errored) as it settles. Reset the sets first.
   useEffect(() => {
     if (!frames.length) return;
-    const preloaded = frames.map((src) => {
+    let cancelled = false;
+    setLoaded(new Set());
+    setErrored(new Set());
+
+    const imgs = frames.map((src, i) => {
       const im = new Image();
+      im.onload = () => {
+        if (cancelled) return;
+        setLoaded((prev) => {
+          const next = new Set(prev);
+          next.add(i);
+          return next;
+        });
+      };
+      im.onerror = () => {
+        if (cancelled) return;
+        setErrored((prev) => {
+          const next = new Set(prev);
+          next.add(i);
+          return next;
+        });
+      };
       im.src = src;
       return im;
     });
+
     return () => {
-      preloaded.length = 0;
+      cancelled = true;
+      imgs.forEach((im) => {
+        im.onload = null;
+        im.onerror = null;
+      });
     };
   }, [active, planes]);
+
+  // Advance the on-screen frame to the target only once that target is loaded.
+  // Until then, the previous frame stays put — no flash.
+  useEffect(() => {
+    if (loaded.has(index)) {
+      setShownIndex(index);
+    }
+  }, [index, loaded]);
+
+  const targetLoaded = loaded.has(index);
+  const targetErrored = errored.has(index);
+  const waiting = !targetLoaded && !targetErrored;
+  const showImg = loaded.has(shownIndex) && !!frames[shownIndex];
 
   // Move through the stack, clamped against the live frame count.
   function step(delta) {
@@ -101,6 +149,7 @@ export default function ScanViewer({ scanId }) {
   function switchPlane(name) {
     setActive(name);
     setIndex(0);
+    setShownIndex(0);
   }
 
   if (loading) {
@@ -149,13 +198,25 @@ export default function ScanViewer({ scanId }) {
         onKeyDown={onKeyDown}
         aria-label={PLANE_LABEL[active] + " view, frame " + (index + 1) + " of " + count}
       >
-        {frames[index] ? (
+        {showImg ? (
           <img
             className="sv-img"
-            src={frames[index]}
-            alt={PLANE_LABEL[active] + " frame " + (index + 1)}
+            src={frames[shownIndex]}
+            alt={PLANE_LABEL[active] + " frame " + (shownIndex + 1)}
             draggable={false}
           />
+        ) : null}
+
+        {waiting ? (
+          <div className="sv-overlay">
+            <span className="sv-spin" />
+          </div>
+        ) : null}
+
+        {!waiting && targetErrored ? (
+          <div className="sv-overlay sv-overlay-text">
+            This preview link has expired. Refresh the page to reload it.
+          </div>
         ) : null}
       </div>
 
@@ -198,6 +259,11 @@ function ViewerStyle() {
       .sv-stage:focus-visible{border-color:rgba(231,174,59,.6);}
       .sv-img{display:block;max-width:100%;max-height:62vh;object-fit:contain;
         user-select:none;-webkit-user-drag:none;}
+      .sv-overlay{position:absolute;inset:0;display:flex;align-items:center;
+        justify-content:center;background:rgba(10,20,34,.35);}
+      .sv-overlay-text{background:rgba(10,20,34,.6);text-align:center;padding:0 24px;
+        font-size:13px;color:rgba(247,244,236,.7);line-height:1.5;}
+      .sv-overlay .sv-spin{width:22px;height:22px;border-width:3px;}
       .sv-controls{display:flex;align-items:center;gap:14px;margin-top:14px;}
       .sv-range{flex:1;accent-color:#e7ae3b;cursor:pointer;}
       .sv-count{flex:none;font-size:13px;font-variant-numeric:tabular-nums;
