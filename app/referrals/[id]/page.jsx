@@ -77,6 +77,12 @@ export default async function ReferralDetailPage({ params }) {
     ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
     : "Patient";
 
+  // Only CBCT scans have a slice preview. OPG scans are JPEGs (their own image)
+  // and don't get the slice viewer. This drives whether we mount the viewer.
+  const isCbct =
+    !!scanType &&
+    /cbct/i.test((scanType.code || "") + " " + (scanType.name || ""));
+
   const { data: scans } = await supabase
     .from("scans")
     .select("id, original_filename, file_size_bytes, preview_status, uploaded_at")
@@ -173,7 +179,7 @@ export default async function ReferralDetailPage({ params }) {
                       Download
                     </a>
                   </div>
-                  {s.preview_status === "ready" && <ScanViewer scanId={s.id} />}
+                  {isCbct && <ScanViewer scanId={s.id} />}
                 </li>
               ))}
             </ul>
