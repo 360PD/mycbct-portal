@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 
 const PLANE_ORDER = ["axial", "coronal", "sagittal"];
 const PLANE_LABEL = { axial: "Axial", coronal: "Coronal", sagittal: "Sagittal" };
+const POLL_MS = 4000; // while a preview builds, re-check every 4s
 
 export default function ScanViewer({ scanId }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);   // first request in flight
+  const [preparing, setPreparing] = useState(false); // worker is building it
+  const [error, setError] = useState("");          // "" | "failed" | "nopreview" | other
   const [planes, setPlanes] = useState(null);
   const [active, setActive] = useState("axial");
   const [index, setIndex] = useState(0);
@@ -15,7 +17,7 @@ export default function ScanViewer({ scanId }) {
   // Which frames of the ACTIVE plane have finished downloading (loaded) or
   // failed (errored), and which frame is actually on screen (shownIndex).
   // We only ever display a fully-loaded frame, and hold the previous one until
-  // the next is ready — so scrubbing never flashes blank.
+  // the next is ready - so scrubbing never flashes blank.
   const [loaded, setLoaded] = useState(() => new Set());
   const [errored, setErrored] = useState(() => new Set());
   const [shownIndex, setShownIndex] = useState(0);
@@ -23,36 +25,77 @@ export default function ScanViewer({ scanId }) {
   const stageRef = useRef(null);
   const countRef = useRef(0);
 
-  // Load the manifest of signed frame URLs once.
+  // Load the manifest of signed frame URLs. If the scan isn't ready yet, the
+  // route flips it to pending (the on-demand build) and we poll until it's done.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError("");
+    let timer = null;
 
-    fetch("/api/scans/" + scanId + "/preview")
-      .then(async (res) => {
-        if (!res.ok) throw new Error("not ready");
-        return res.json();
-      })
-      .then((data) => {
+    setLoading(true);
+    setPreparing(false);
+    setError("");
+    setPlanes(null);
+
+    async function attempt() {
+      try {
+        const res = await fetch("/api/scans/" + scanId + "/preview");
+
+        if (res.status === 200) {
+          const data = await res.json();
+          if (cancelled) return;
+          const got = data.planes || {};
+          const first = PLANE_ORDER.find(
+            (p) => got[p] && got[p].frames && got[p].frames.length
+          );
+          if (!first) throw new Error("empty");
+          setPlanes(got);
+          setActive(first);
+          setIndex(0);
+          setShownIndex(0);
+          setPreparing(false);
+          setLoading(false);
+          return;
+        }
+
+        if (res.status === 409) {
+          const data = await res.json().catch(() => ({}));
+          if (cancelled) return;
+          const st = data.status || "none";
+
+          if (data.previewable === false) {
+            // OPG or non-CBCT - no slice viewer for this one.
+            setError("nopreview");
+            setPreparing(false);
+            setLoading(false);
+            return;
+          }
+          if (st === "failed") {
+            setError("failed");
+            setPreparing(false);
+            setLoading(false);
+            return;
+          }
+          // none / pending / processing -> being built; show "preparing" and poll.
+          setPreparing(true);
+          setLoading(false);
+          timer = setTimeout(attempt, POLL_MS);
+          return;
+        }
+
+        throw new Error("bad status " + res.status);
+      } catch (e) {
         if (cancelled) return;
-        const got = data.planes || {};
-        const first = PLANE_ORDER.find((p) => got[p] && got[p].frames && got[p].frames.length);
-        if (!first) throw new Error("empty");
-        setPlanes(got);
-        setActive(first);
-        setIndex(0);
-        setShownIndex(0);
+        setError("load");
+        setPreparing(false);
         setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError("Preview couldn't be loaded.");
-        setLoading(false);
-      });
+      }
+    }
+
+    attempt();
 
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [scanId]);
 
@@ -101,7 +144,7 @@ export default function ScanViewer({ scanId }) {
   }, [active, planes]);
 
   // Advance the on-screen frame to the target only once that target is loaded.
-  // Until then, the previous frame stays put — no flash.
+  // Until then, the previous frame stays put - no flash.
   useEffect(() => {
     if (loaded.has(index)) {
       setShownIndex(index);
@@ -134,7 +177,7 @@ export default function ScanViewer({ scanId }) {
     }
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [planes]);
 
   function onKeyDown(e) {
     if (e.key === "ArrowLeft") {
@@ -152,12 +195,47 @@ export default function ScanViewer({ scanId }) {
     setShownIndex(0);
   }
 
+  // Non-CBCT scan: render nothing at all (the download link still shows above).
+  if (error === "nopreview") {
+    return null;
+  }
+
   if (loading) {
     return (
       <div className="sv">
         <div className="sv-msg">
           <span className="sv-spin" /> Loading preview&hellip;
         </div>
+        <ViewerStyle />
+      </div>
+    );
+  }
+
+  // Being built on demand - first open of a historical scan.
+  if (preparing) {
+    return (
+      <div className="sv">
+        <div className="sv-prep">
+          <span className="sv-spin" />
+          <div>
+            <p className="sv-prep-title">Preparing preview&hellip;</p>
+            <p className="sv-prep-sub">
+              This builds the first time a scan is opened and usually takes about a minute.
+              It will appear here automatically &mdash; no need to refresh.
+            </p>
+          </div>
+        </div>
+        <ViewerStyle />
+      </div>
+    );
+  }
+
+  if (error === "failed") {
+    return (
+      <div className="sv">
+        <p className="sv-msg sv-muted">
+          The preview couldn&rsquo;t be built for this scan. You can still use Download above.
+        </p>
         <ViewerStyle />
       </div>
     );
@@ -174,7 +252,9 @@ export default function ScanViewer({ scanId }) {
     );
   }
 
-  const available = PLANE_ORDER.filter((p) => planes[p] && planes[p].frames && planes[p].frames.length);
+  const available = PLANE_ORDER.filter(
+    (p) => planes[p] && planes[p].frames && planes[p].frames.length
+  );
 
   return (
     <div className="sv">
@@ -272,6 +352,12 @@ function ViewerStyle() {
       .sv-msg{display:flex;align-items:center;gap:10px;font-size:14px;
         color:rgba(247,244,236,.6);padding:18px 0;}
       .sv-muted{color:rgba(247,244,236,.5);}
+      .sv-prep{display:flex;align-items:flex-start;gap:14px;
+        background:rgba(247,244,236,.04);border:1px solid rgba(247,244,236,.1);
+        border-radius:12px;padding:18px 20px;}
+      .sv-prep .sv-spin{width:20px;height:20px;border-width:3px;margin-top:2px;flex:none;}
+      .sv-prep-title{margin:0 0 4px;font-size:15px;font-weight:600;color:#f7f4ec;}
+      .sv-prep-sub{margin:0;font-size:13px;line-height:1.5;color:rgba(247,244,236,.55);}
       .sv-spin{width:15px;height:15px;border-radius:50%;
         border:2px solid rgba(247,244,236,.25);border-top-color:#e7ae3b;
         display:inline-block;animation:svspin .7s linear infinite;}
