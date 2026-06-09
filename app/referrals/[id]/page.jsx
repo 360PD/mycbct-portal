@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { presignView } from "@/lib/backblaze";
 import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
 
@@ -24,6 +25,10 @@ const PREVIEW_LABEL = {
 function one(v) {
   if (Array.isArray(v)) return v[0] || null;
   return v || null;
+}
+
+function isImageFile(name) {
+  return /\.(jpe?g|png)$/i.test(name || "");
 }
 
 function fmtDate(d) {
@@ -78,18 +83,35 @@ export default async function ReferralDetailPage({ params }) {
     : "Patient";
 
   // Only CBCT scans have a slice preview. OPG scans are JPEGs (their own image)
-  // and don't get the slice viewer. This drives whether we mount the viewer.
+  // and show inline instead of going through the slice viewer.
   const isCbct =
     !!scanType &&
     /cbct/i.test((scanType.code || "") + " " + (scanType.name || ""));
 
   const { data: scans } = await supabase
     .from("scans")
-    .select("id, original_filename, file_size_bytes, preview_status, uploaded_at")
+    .select("id, original_filename, file_size_bytes, preview_status, uploaded_at, storage_key")
     .eq("referral_id", id)
     .order("uploaded_at", { ascending: false });
 
   const scanList = scans || [];
+
+  // For OPG (non-CBCT) image scans, sign an inline URL so the page can show the
+  // image directly. CBCT scans are handled by the slice viewer, not here.
+  const imageUrls = {};
+  if (!isCbct) {
+    await Promise.all(
+      scanList.map(async (s) => {
+        if (s.storage_key && isImageFile(s.original_filename)) {
+          try {
+            imageUrls[s.id] = await presignView(s.storage_key);
+          } catch {
+            /* leave unset — falls back to the Download button */
+          }
+        }
+      })
+    );
+  }
 
   return (
     <main className="rd">
@@ -179,7 +201,24 @@ export default async function ReferralDetailPage({ params }) {
                       Download
                     </a>
                   </div>
+
                   {isCbct && <ScanViewer scanId={s.id} />}
+
+                  {!isCbct && imageUrls[s.id] && (
+                    <a
+                      className="rd-opg-link"
+                      href={imageUrls[s.id]}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        className="rd-opg"
+                        src={imageUrls[s.id]}
+                        alt={"OPG image for " + patientName}
+                        loading="lazy"
+                      />
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>
@@ -227,6 +266,9 @@ export default async function ReferralDetailPage({ params }) {
           color:#e7ae3b;border:1px solid rgba(231,174,59,.4);border-radius:8px;
           padding:8px 16px;transition:background .15s ease;}
         .rd-dl:hover{background:rgba(231,174,59,.12);}
+        .rd-opg-link{display:block;margin-top:4px;}
+        .rd-opg{display:block;width:100%;height:auto;max-height:62vh;object-fit:contain;
+          background:#0a1422;border:1px solid rgba(247,244,236,.1);border-radius:12px;}
         @media(max-width:560px){.rd-grid{grid-template-columns:1fr;}}
       `}</style>
     </main>
