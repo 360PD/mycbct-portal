@@ -2,14 +2,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
-// Booking page — staff/admin only. Phase 4a.
-// One scanner, Mon-Fri, 09:00-17:00, 30-minute slots.
-// Books the chosen slot for this referral and sets its status to "booked".
+// Booking page v2 — slots come from the scanning diary (open_sessions).
+// A day only offers slots if it's been opened on /diary, and only the
+// times of the open session (AM, PM, or full day). 30-minute slots.
 
 export const dynamic = "force-dynamic";
 
-const OPEN_HOUR = 9;
-const CLOSE_HOUR = 17;
 const SLOT_MINUTES = 30;
 
 function one(v) {
@@ -57,14 +55,25 @@ function nextWeekday(dayStr) {
   return d;
 }
 
-function buildSlotTimes() {
-  const times = [];
-  for (let h = OPEN_HOUR; h < CLOSE_HOUR; h++) {
-    for (let m = 0; m < 60; m += SLOT_MINUTES) {
-      times.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+// "09:00:00" -> minutes since midnight.
+function toMinutes(t) {
+  const s = String(t || "");
+  return Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
+}
+
+// Build the slot times offered by this day's open sessions.
+function buildSlotTimes(sessions) {
+  const times = new Set();
+  for (const sess of sessions || []) {
+    const start = toMinutes(sess.start_time);
+    const end = toMinutes(sess.end_time);
+    for (let m = start; m + SLOT_MINUTES <= end; m += SLOT_MINUTES) {
+      const h = Math.floor(m / 60);
+      const min = m % 60;
+      times.add(`${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
     }
   }
-  return times;
+  return Array.from(times).sort();
 }
 
 function fmtDayLong(dayStr) {
@@ -213,28 +222,28 @@ export default async function BookPage({ params, searchParams }) {
   day = nextWeekday(day);
   const error = sp.error;
 
-  const { data: blocked } = await supabase
-    .from("blocked_dates")
-    .select("day, reason")
-    .eq("day", day)
-    .maybeSingle();
+  // What has Rachel opened for this day?
+  const { data: sessions } = await supabase
+    .from("open_sessions")
+    .select("start_time, end_time")
+    .eq("day", day);
+  const dayOpen = (sessions || []).length > 0;
 
-  const slotTimes = buildSlotTimes();
+  const slotTimes = dayOpen ? buildSlotTimes(sessions) : [];
   const slotISOs = slotTimes.map((t) => londonSlotISO(day, t));
 
-  const { data: taken } = await supabase
-    .from("appointments")
-    .select("starts_at")
-    .gte("starts_at", slotISOs[0])
-    .lte("starts_at", slotISOs[slotISOs.length - 1])
-    .eq("status", "booked");
-  const takenSet = new Set((taken || []).map((a) => new Date(a.starts_at).toISOString()));
+  let takenSet = new Set();
+  if (slotISOs.length > 0) {
+    const { data: taken } = await supabase
+      .from("appointments")
+      .select("starts_at")
+      .gte("starts_at", slotISOs[0])
+      .lte("starts_at", slotISOs[slotISOs.length - 1])
+      .eq("status", "booked");
+    takenSet = new Set((taken || []).map((a) => new Date(a.starts_at).toISOString()));
+  }
 
   const nowISO = new Date().toISOString();
-  const prevDay = nextWeekday(addDays(day, -1) === day ? addDays(day, -3) : addDays(day, -1)) === day
-    ? addDays(day, -3)
-    : addDays(day, -1);
-  // Simple prev/next that skip weekends:
   let prev = addDays(day, -1);
   while (isWeekend(prev)) prev = addDays(prev, -1);
   let next = addDays(day, 1);
@@ -277,6 +286,7 @@ export default async function BookPage({ params, searchParams }) {
         .bk-slot:disabled{opacity:.32;cursor:not-allowed;border-color:rgba(247,244,236,.12);}
         .bk-slot:disabled:hover{color:#f7f4ec;}
         .bk-closed{color:rgba(247,244,236,.6);font-size:15px;line-height:1.6;}
+        .bk-closed a{color:#e7ae3b;font-weight:600;}
       `}</style>
 
       <div className="bk-inner">
@@ -316,10 +326,10 @@ export default async function BookPage({ params, searchParams }) {
               </a>
             </div>
 
-            {blocked ? (
+            {!dayOpen ? (
               <p className="bk-closed">
-                The scanning centre is closed this day
-                {blocked.reason ? ` (${blocked.reason})` : ""}. Pick another day.
+                The scanning centre isn&rsquo;t open this day. Pick another day, or open
+                it in the <a href="/diary">Scanning diary</a> first.
               </p>
             ) : (
               <div className="bk-grid">
