@@ -1,15 +1,22 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-// v7 — action queue shows appointment times and Book buttons.
-// Unbooked queue rows get a gold Book button straight to the booking
-// calendar; booked rows show their appointment time. Otherwise v6.
+// v7.1 — fixes the appointment lookup on the action queue.
+// The appointments embed can be an object or an array depending on how
+// PostgREST reads the one-to-one relationship; normalise before use.
 
 // Supabase embeds can come back as an object or a single-item array
 // depending on how it reads the relationship; normalise to one record.
 function one(v) {
   if (Array.isArray(v)) return v[0] ?? null;
   return v ?? null;
+}
+
+// Normalise an embed to an array, whatever shape it arrives in.
+function many(v) {
+  if (Array.isArray(v)) return v;
+  if (v) return [v];
+  return [];
 }
 
 const STATUS_LABEL = {
@@ -147,13 +154,13 @@ export default async function DashboardPage({ searchParams }) {
       .limit(100);
 
     queue = (pending || [])
-      .filter((r) => !(r.scans || []).length)
+      .filter((r) => !many(r.scans).length)
       .map((r) => {
         const pat = one(r.patients);
         const st = one(r.scan_types);
         const pr = one(r.practices);
         const d = daysWaiting(r.created_at);
-        const appt = (r.appointments || []).find((a) => a.status === "booked") || null;
+        const appt = many(r.appointments).find((a) => a && a.status === "booked") || null;
         return {
           id: r.id,
           patientName: pat ? `${pat.first_name} ${pat.last_name}` : "—",
