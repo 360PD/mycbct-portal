@@ -2,7 +2,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
-// v4 — team notification + dentist confirmation, neutral wording.
+// v5 — staff can submit referrals for a chosen practice.
+// A practiceId in the input is honoured ONLY when the signed-in user's
+// profile role is staff or admin; dentists always use their own practice.
+// Otherwise identical to v4 (team + dentist confirmation emails).
 
 // Who gets the "new referral received" email.
 const NOTIFY = ["pete@360v.co.uk", "rachelh@360v.co.uk"];
@@ -18,6 +21,7 @@ export type ReferralInput = {
   clinicalNotes: string;
   reportRequested: boolean;
   signatureName: string;
+  practiceId?: string; // staff/admin only — ignored for dentists
 };
 
 export type ReferralResult =
@@ -77,17 +81,26 @@ export async function createReferral(
   if (!claims) return { ok: false, error: "You're not signed in." };
   const userId = claims.sub as string;
 
-  // Who is the dentist, and which practice are they in?
+  // Who is submitting, and which practice does this referral belong to?
   const { data: profile, error: pErr } = await supabase
     .from("profiles")
-    .select("practice_id, full_name, email")
+    .select("practice_id, full_name, email, role")
     .eq("id", userId)
     .single();
   if (pErr || !profile) {
     return { ok: false, error: "Could not load your profile." };
   }
-  if (!profile.practice_id) {
-    return { ok: false, error: "NO_PRACTICE" };
+
+  const isStaff = profile.role === "staff" || profile.role === "admin";
+
+  // Staff may pick any practice; dentists always use their own.
+  const practiceId =
+    isStaff && input.practiceId ? input.practiceId : profile.practice_id;
+  if (!practiceId) {
+    return {
+      ok: false,
+      error: isStaff ? "Please choose a practice." : "NO_PRACTICE",
+    };
   }
 
   // Basic server-side validation (never trust the client alone).
@@ -101,11 +114,11 @@ export async function createReferral(
     return { ok: false, error: "Please answer the pregnancy question." };
   }
 
-  // 1) Create the patient (scoped to the dentist's practice).
+  // 1) Create the patient (scoped to the referral's practice).
   const { data: patient, error: patErr } = await supabase
     .from("patients")
     .insert({
-      practice_id: profile.practice_id,
+      practice_id: practiceId,
       first_name: input.firstName.trim(),
       last_name: input.lastName.trim(),
       date_of_birth: input.dob || null,
@@ -117,11 +130,11 @@ export async function createReferral(
     return { ok: false, error: patErr?.message || "Could not save the patient." };
   }
 
-  // 2) Create the referral, stamped with the signed-in dentist.
+  // 2) Create the referral, stamped with the signed-in user.
   const { data: referral, error: refErr } = await supabase
     .from("referrals")
     .insert({
-      practice_id: profile.practice_id,
+      practice_id: practiceId,
       referring_dentist_id: userId,
       patient_id: patient.id,
       scan_type_id: input.scanTypeId,
@@ -149,7 +162,7 @@ export async function createReferral(
     supabase
       .from("practices")
       .select("name")
-      .eq("id", profile.practice_id)
+      .eq("id", practiceId)
       .single(),
     supabase
       .from("scan_types")
@@ -180,7 +193,8 @@ export async function createReferral(
     `
   );
 
-  // 3b) Confirmation to the referring dentist.
+  // 3b) Confirmation to the submitter (dentists get their copy here;
+  // for staff this is just a receipt to their own inbox).
   if (profile.email) {
     await sendEmail(
       [profile.email],
