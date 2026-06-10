@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 
+// v3 — clearer message when an invite link has already been used.
 // Handles auth links arriving from email.
 // Supports BOTH styles:
 //  1. PKCE links:        /auth/callback?code=...&next=/dashboard
@@ -34,6 +35,16 @@ export async function GET(request: Request) {
     });
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
+    }
+
+    // Invite links are single-use, so a second click lands here. Tell the
+    // person what actually happened and point them at the way in.
+    if (type === "invite") {
+      return NextResponse.redirect(
+        `${origin}/sign-in?notice=${encodeURIComponent(
+          "That invite link has already been used. If you've set your password, sign in below. If not, ask 360 Visualise to send a fresh invite."
+        )}`
+      );
     }
   }
 
