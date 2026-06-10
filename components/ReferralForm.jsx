@@ -1,222 +1,350 @@
-"use server";
-import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+"use client";
 
-// v5 — staff can submit referrals for a chosen practice.
-// A practiceId in the input is honoured ONLY when the signed-in user's
-// profile role is staff or admin; dentists always use their own practice.
-// Otherwise identical to v4 (team + dentist confirmation emails).
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createReferral } from "@/app/refer/actions";
 
-// Who gets the "new referral received" email.
-const NOTIFY = ["pete@360v.co.uk", "rachelh@360v.co.uk"];
+/**
+ * MyCBCT — Referral form (Phase 2).
+ * Wired to the createReferral server action: creates a patient + referral,
+ * stamped with the signed-in dentist, scoped to their practice by RLS.
+ *
+ * Props (from app/refer/page.tsx):
+ *   hasPractice  : boolean  — is the dentist linked to a practice yet?
+ *   practiceName : string|null
+ *   dentistName  : string   — default for the signature
+ *   scanTypes    : [{ id, code, name, description, base_price }]
+ */
 
-export type ReferralInput = {
-  firstName: string;
-  lastName: string;
-  dob: string; // YYYY-MM-DD or ""
-  sex: string; // "male" | "female" | "other" | ""
-  pregnancy: string; // "no" | "yes" | "unsure" | "not_applicable"
-  scanTypeId: string;
-  regionOfInterest: string;
-  clinicalNotes: string;
-  reportRequested: boolean;
-  signatureName: string;
-  practiceId?: string; // staff/admin only — ignored for dentists
-};
+const SEX = [
+  { v: "male", label: "Male" },
+  { v: "female", label: "Female" },
+  { v: "other", label: "Other" },
+];
 
-export type ReferralResult =
-  | { ok: true; referralId: string }
-  | { ok: false; error: string };
+const PREGNANCY = [
+  { v: "no", label: "No" },
+  { v: "yes", label: "Yes" },
+  { v: "unsure", label: "Unsure" },
+  { v: "not_applicable", label: "N/A" },
+];
 
-// Best-effort email sender. Never throws into the caller's path —
-// a mail hiccup must never stop a referral being filed.
-async function sendEmail(to: string[], subject: string, html: string) {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) return;
-  try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "MyCBCT <scans@mycbct.co.uk>",
-        to,
-        subject,
-        html,
-      }),
-    });
-  } catch {
-    // Swallow — notifications are best-effort by design.
-  }
-}
+const ARCH = [
+  { v: "upper", label: "Upper jaw" },
+  { v: "lower", label: "Lower jaw" },
+];
 
-function detailsTable(opts: {
-  ref: string;
-  patientName: string;
-  practiceName: string;
-  scanTypeName: string;
-  signatureName: string;
-  reportRequested: boolean;
+const money = (pence) =>
+  typeof pence === "number"
+    ? new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: "GBP",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      }).format(pence / 100)
+    : "";
+
+export default function ReferralForm({
+  hasPractice,
+  practiceName,
+  dentistName = "",
+  scanTypes = [],
 }) {
-  return `
-    <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Reference</td><td style="padding:4px 0;"><strong>${opts.ref}</strong></td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Patient</td><td style="padding:4px 0;"><strong>${opts.patientName}</strong></td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Practice</td><td style="padding:4px 0;">${opts.practiceName}</td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Scan type</td><td style="padding:4px 0;">${opts.scanTypeName}</td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Referred by</td><td style="padding:4px 0;">${opts.signatureName}</td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Consultant report</td><td style="padding:4px 0;">${opts.reportRequested ? "Requested" : "Not requested"}</td></tr>
-    </table>
-  `;
-}
+  const router = useRouter();
 
-export async function createReferral(
-  input: ReferralInput
-): Promise<ReferralResult> {
-  const supabase = await createClient();
-  const { data: claimsData } = await supabase.auth.getClaims();
-  const claims = claimsData?.claims;
-  if (!claims) return { ok: false, error: "You're not signed in." };
-  const userId = claims.sub as string;
-
-  // Who is submitting, and which practice does this referral belong to?
-  const { data: profile, error: pErr } = await supabase
-    .from("profiles")
-    .select("practice_id, full_name, email, role")
-    .eq("id", userId)
-    .single();
-  if (pErr || !profile) {
-    return { ok: false, error: "Could not load your profile." };
-  }
-
-  const isStaff = profile.role === "staff" || profile.role === "admin";
-
-  // Staff may pick any practice; dentists always use their own.
-  const practiceId =
-    isStaff && input.practiceId ? input.practiceId : profile.practice_id;
-  if (!practiceId) {
-    return {
-      ok: false,
-      error: isStaff ? "Please choose a practice." : "NO_PRACTICE",
-    };
-  }
-
-  // Basic server-side validation (never trust the client alone).
-  if (!input.firstName?.trim() || !input.lastName?.trim()) {
-    return { ok: false, error: "Patient name is required." };
-  }
-  if (!input.scanTypeId) {
-    return { ok: false, error: "Please choose a scan type." };
-  }
-  if (!input.pregnancy) {
-    return { ok: false, error: "Please answer the pregnancy question." };
-  }
-
-  // 1) Create the patient (scoped to the referral's practice).
-  const { data: patient, error: patErr } = await supabase
-    .from("patients")
-    .insert({
-      practice_id: practiceId,
-      first_name: input.firstName.trim(),
-      last_name: input.lastName.trim(),
-      date_of_birth: input.dob || null,
-      sex: input.sex || null,
-    })
-    .select("id")
-    .single();
-  if (patErr || !patient) {
-    return { ok: false, error: patErr?.message || "Could not save the patient." };
-  }
-
-  // 2) Create the referral, stamped with the signed-in user.
-  const { data: referral, error: refErr } = await supabase
-    .from("referrals")
-    .insert({
-      practice_id: practiceId,
-      referring_dentist_id: userId,
-      patient_id: patient.id,
-      scan_type_id: input.scanTypeId,
-      pregnancy: input.pregnancy,
-      clinical_notes: input.clinicalNotes?.trim() || null,
-      region_of_interest: input.regionOfInterest?.trim() || null,
-      report_requested: !!input.reportRequested,
-      signature_name:
-        input.signatureName?.trim() || profile.full_name || null,
-      status: "submitted",
-    })
-    .select("id")
-    .single();
-  if (refErr || !referral) {
-    return { ok: false, error: refErr?.message || "Could not save the referral." };
-  }
-
-  // 3) Emails. Best-effort — sent after the referral is safely saved.
-  const signature =
-    input.signatureName?.trim() || profile.full_name || "Unknown";
-  const patientName = `${input.firstName.trim()} ${input.lastName.trim()}`;
-  const ref = referral.id.slice(0, 8).toUpperCase();
-
-  const [{ data: practice }, { data: scanType }] = await Promise.all([
-    supabase
-      .from("practices")
-      .select("name")
-      .eq("id", practiceId)
-      .single(),
-    supabase
-      .from("scan_types")
-      .select("name")
-      .eq("id", input.scanTypeId)
-      .single(),
-  ]);
-
-  const details = detailsTable({
-    ref,
-    patientName,
-    practiceName: practice?.name || "Unknown practice",
-    scanTypeName: scanType?.name || "Unknown scan type",
-    signatureName: signature,
-    reportRequested: !!input.reportRequested,
+  const [f, setF] = useState({
+    firstName: "",
+    lastName: "",
+    dob: "",
+    sex: "",
+    pregnancy: "",
+    scanTypeId: "",
+    arch: "", // single-jaw only: "upper" | "lower"
+    regionOfInterest: "",
+    clinicalNotes: "",
+    reportChoice: "", // "self" | "arrange"
+    signatureName: dentistName || "",
   });
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [banner, setBanner] = useState("");
+  const [done, setDone] = useState(null); // { patientName, ref }
 
-  // 3a) Team notification.
-  await sendEmail(
-    NOTIFY,
-    `New referral: ${patientName} — ${scanType?.name || "Scan"} (${practice?.name || "Unknown practice"})`,
-    `
-      <h2 style="margin:0 0 12px;">New referral received</h2>
-      ${details}
-      <p style="font-family:Arial,sans-serif;font-size:14px;">
-        <a href="https://mycbct-portal.vercel.app/referrals/${referral.id}">Open this referral in MyCBCT</a>
-      </p>
-    `
-  );
+  const set = (k, v) => {
+    setF((prev) => ({ ...prev, [k]: v }));
+    setErrors((prev) => (prev[k] ? { ...prev, [k]: 0 } : prev));
+  };
 
-  // 3b) Confirmation to the submitter (dentists get their copy here;
-  // for staff this is just a receipt to their own inbox).
-  if (profile.email) {
-    await sendEmail(
-      [profile.email],
-      `Referral received: ${patientName} (ref ${ref})`,
-      `
-        <h2 style="margin:0 0 12px;">Thank you — your referral is in</h2>
-        <p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;">
-          We've received your referral for <strong>${patientName}</strong>.
-          We'll take it from here &mdash; you'll get another email when the scan
-          is ready to view.
-        </p>
-        ${details}
-        <p style="font-family:Arial,sans-serif;font-size:14px;">
-          <a href="https://mycbct-portal.vercel.app/dashboard">View your referrals in MyCBCT</a>
-        </p>
-        <p style="font-family:Arial,sans-serif;font-size:12px;color:#888;">
-          Questions? Reply to this email or call 360 Visualise.
-        </p>
-      `
-    );
+  const chosenScan = scanTypes.find((s) => s.id === f.scanTypeId) || null;
+  const reportAvailable = !!chosenScan && chosenScan.code !== "ios";
+
+  function validate() {
+    const e = {};
+    if (!f.firstName.trim()) e.firstName = 1;
+    if (!f.lastName.trim()) e.lastName = 1;
+    if (!f.dob) e.dob = 1;
+    if (!f.sex) e.sex = 1;
+    if (!f.pregnancy) e.pregnancy = 1;
+    if (!f.scanTypeId) e.scanTypeId = 1;
+    if (chosenScan && chosenScan.code === "single_jaw" && !f.arch) e.arch = 1;
+    if (!f.regionOfInterest.trim()) e.regionOfInterest = 1;
+    if (!f.clinicalNotes.trim()) e.clinicalNotes = 1;
+    if (!f.reportChoice) e.reportChoice = 1;
+    if (!f.signatureName.trim()) e.signatureName = 1;
+    setErrors(e);
+    return Object.keys(e).length === 0;
   }
 
-  revalidatePath("/dashboard");
-  return { ok: true, referralId: referral.id };
-}
+  async function submit() {
+    setBanner("");
+    if (!validate()) {
+      setBanner("Please complete the highlighted fields.");
+      return;
+    }
+    setSubmitting(true);
+
+    // For a single-arch scan, record which jaw at the top of the notes.
+    let notes = f.clinicalNotes.trim();
+    if (chosenScan && chosenScan.code === "single_jaw" && f.arch) {
+      const archLabel = f.arch === "upper" ? "Upper jaw" : "Lower jaw";
+      notes = `Arch: ${archLabel}.` + (notes ? `\n\n${notes}` : "");
+    }
+
+    try {
+      const res = await createReferral({
+        firstName: f.firstName,
+        lastName: f.lastName,
+        dob: f.dob,
+        sex: f.sex,
+        pregnancy: f.pregnancy,
+        scanTypeId: f.scanTypeId,
+        regionOfInterest: f.regionOfInterest,
+        clinicalNotes: notes,
+        reportRequested: f.reportChoice === "arrange",
+        signatureName: f.signatureName,
+      });
+
+      if (res.ok) {
+        setDone({
+          patientName: `${f.firstName.trim()} ${f.lastName.trim()}`,
+          ref: res.referralId.slice(0, 8).toUpperCase(),
+        });
+        router.refresh();
+      } else if (res.error === "NO_PRACTICE") {
+        setBanner(
+          "Your account isn't linked to a practice yet. Contact 360 Visualise to finish setup."
+        );
+      } else {
+        setBanner(res.error || "Something went wrong. Please try again.");
+      }
+    } catch (err) {
+      setBanner("Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function reset() {
+    setF({
+      firstName: "",
+      lastName: "",
+      dob: "",
+      sex: "",
+      pregnancy: "",
+      scanTypeId: "",
+      arch: "",
+      regionOfInterest: "",
+      clinicalNotes: "",
+      reportChoice: "",
+      signatureName: dentistName || "",
+    });
+    setErrors({});
+    setBanner("");
+    setDone(null);
+  }
+
+  return (
+    <main className="rf-root">
+      <style>{styles}</style>
+
+      <header className="rf-bar">
+        <div className="rf-brand">
+          MyCBCT<span className="by">by 360 Visualise</span>
+        </div>
+        <a className="rf-back" href="/dashboard">
+          &larr; Dashboard
+        </a>
+      </header>
+
+      <div className="rf-wrap">
+        {/* ---------- Not linked to a practice yet ---------- */}
+        {!hasPractice ? (
+          <div className="rf-card rf-notice">
+            <span className="rf-tag">Account setup</span>
+            <h1>Almost ready</h1>
+            <p>
+              Your login works, but it isn&rsquo;t linked to a practice yet, so
+              referrals can&rsquo;t be created. Contact 360 Visualise to finish
+              setup &mdash; then this form goes live for you.
+            </p>
+            <a className="rf-cta" href="/dashboard">
+              Back to dashboard
+            </a>
+          </div>
+        ) : done ? (
+          /* ---------- Success ---------- */
+          <div className="rf-card rf-success">
+            <div className="rf-tick" aria-hidden="true">
+              &#10003;
+            </div>
+            <h1>Referral submitted</h1>
+            <p>
+              <strong>{done.patientName}</strong> has been referred. Reference{" "}
+              <strong>{done.ref}</strong>. It&rsquo;s now on your dashboard, and
+              the 360 Visualise team can see it.
+            </p>
+            <div className="rf-success-actions">
+              <button className="rf-cta" type="button" onClick={reset}>
+                Refer another patient
+              </button>
+              <a className="rf-ghost" href="/dashboard">
+                Back to dashboard
+              </a>
+            </div>
+          </div>
+        ) : (
+          /* ---------- The form ---------- */
+          <>
+            <div className="rf-intro">
+              <span className="rf-tag">New referral</span>
+              <h1>Refer a patient</h1>
+              {practiceName && (
+                <p className="rf-practice">
+                  Referring as <strong>{practiceName}</strong>
+                </p>
+              )}
+            </div>
+
+            {banner && <div className="rf-banner">{banner}</div>}
+
+            {/* Patient */}
+            <section className="rf-card">
+              <h2>Patient details</h2>
+              <div className="rf-grid">
+                <div className="rf-field">
+                  <label>First name *</label>
+                  <input
+                    className={errors.firstName ? "err" : ""}
+                    value={f.firstName}
+                    onChange={(e) => set("firstName", e.target.value)}
+                    placeholder="Jane"
+                  />
+                </div>
+                <div className="rf-field">
+                  <label>Last name *</label>
+                  <input
+                    className={errors.lastName ? "err" : ""}
+                    value={f.lastName}
+                    onChange={(e) => set("lastName", e.target.value)}
+                    placeholder="Smith"
+                  />
+                </div>
+                <div className="rf-field">
+                  <label>Date of birth *</label>
+                  <input
+                    type="date"
+                    className={errors.dob ? "err" : ""}
+                    value={f.dob}
+                    onChange={(e) => set("dob", e.target.value)}
+                  />
+                </div>
+                <div className="rf-field">
+                  <label>Sex *</label>
+                  <div className={"rf-seg " + (errors.sex ? "err" : "")}>
+                    {SEX.map((s) => (
+                      <button
+                        key={s.v}
+                        type="button"
+                        className={f.sex === s.v ? "on" : ""}
+                        onClick={() => set("sex", s.v)}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rf-field">
+                <label>Is the patient pregnant or possibly pregnant? *</label>
+                <p className="rf-help">
+                  Required for radiation safety (IRMER). A simple flag is enough.
+                </p>
+                <div className={"rf-seg " + (errors.pregnancy ? "err" : "")}>
+                  {PREGNANCY.map((p) => (
+                    <button
+                      key={p.v}
+                      type="button"
+                      className={f.pregnancy === p.v ? "on" : ""}
+                      onClick={() => set("pregnancy", p.v)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* Scan */}
+            <section className="rf-card">
+              <h2>The scan</h2>
+
+              <div className="rf-field">
+                <label>Scan type *</label>
+                <div className={"rf-choices " + (errors.scanTypeId ? "err" : "")}>
+                  {scanTypes.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={"rf-choice " + (f.scanTypeId === s.id ? "on" : "")}
+                      onClick={() => {
+                        set("scanTypeId", s.id);
+                        if (s.code !== "single_jaw") set("arch", "");
+                        if (s.code === "ios" && f.reportChoice === "arrange") {
+                          set("reportChoice", "");
+                        }
+                      }}
+                    >
+                      <span className="t">{s.name}</span>
+                      <span className="d">{s.description}</span>
+                      <span className="p">{money(s.base_price)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {chosenScan && chosenScan.code === "single_jaw" && (
+                <div className="rf-field">
+                  <label>Which arch? *</label>
+                  <div className={"rf-seg " + (errors.arch ? "err" : "")}>
+                    {ARCH.map((a) => (
+                      <button
+                        key={a.v}
+                        type="button"
+                        className={f.arch === a.v ? "on" : ""}
+                        onClick={() => set("arch", a.v)}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="rf-field">
+                <label>Region of interest *</label>
+                <input
+                  className={errors.regionOfInterest ? "err" : ""}
+                  value={f.regionOfInterest}
+                  onChange={(e) => set("regionOfInterest", e.target.value)}
+                  placeholder="e
