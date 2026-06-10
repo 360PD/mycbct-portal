@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ReferralForm from "@/components/ReferralForm";
 
-// v2 — hides the legacy "CBCT — historical" type from the picker.
-// The type stays in the database (2,343 migrated scans point at it);
-// it's only excluded from the choices a dentist can pick.
+// v3 — staff get the practice list for the picker.
+// Staff/admin can always open the form (their profile has no practice;
+// they choose one per referral). Dentists work exactly as before.
+// Still hides the legacy "CBCT — historical" type from the picker.
 
 export default async function ReferPage() {
   const supabase = await createClient();
@@ -15,9 +16,12 @@ export default async function ReferPage() {
   }
   const { data: profile } = await supabase
     .from("profiles")
-    .select("practice_id, full_name, email")
+    .select("practice_id, full_name, email, role")
     .eq("id", claims.sub)
     .single();
+
+  const isStaff = profile?.role === "staff" || profile?.role === "admin";
+
   let practiceName = null;
   if (profile?.practice_id) {
     const { data: practice } = await supabase
@@ -27,6 +31,17 @@ export default async function ReferPage() {
       .single();
     practiceName = practice?.name ?? null;
   }
+
+  // Staff choose the practice per referral, so load the full list for them.
+  let practices: { id: string; name: string }[] = [];
+  if (isStaff) {
+    const { data: rows } = await supabase
+      .from("practices")
+      .select("id, name")
+      .order("name");
+    practices = rows || [];
+  }
+
   const { data: scanTypes } = await supabase
     .from("scan_types")
     .select("id, code, name, description, base_price")
@@ -35,12 +50,15 @@ export default async function ReferPage() {
     .neq("code", "ios")
     .neq("code", "cbct_historical")
     .order("sort_order");
+
   return (
     <ReferralForm
-      hasPractice={!!profile?.practice_id}
+      hasPractice={isStaff || !!profile?.practice_id}
       practiceName={practiceName}
       dentistName={profile?.full_name || profile?.email || ""}
       scanTypes={scanTypes || []}
+      isStaff={isStaff}
+      practices={practices}
     />
   );
 }
