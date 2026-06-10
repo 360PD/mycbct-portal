@@ -4,6 +4,12 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+// v3 — upserts the profile so it works with the on_auth_user_created trigger.
+// The trigger auto-creates a bare profile row the moment the invite creates
+// the login, so a plain insert always collided with it ("profiles_pkey").
+// Upsert fills in the trigger's row instead — and still works if the trigger
+// is ever removed.
+
 // Privileged client — needed to create the login, send the invite, and write
 // the profile past row-level security. Server-only; the key never reaches the
 // browser.
@@ -51,14 +57,15 @@ async function addDentist(formData) {
     redirect("/add-dentist?error=" + encodeURIComponent("Server is missing its service key."));
   }
 
-  // Guard: refuse if this email already has an account, so we never collide
-  // with an existing profile (e.g. your own admin login).
+  // Guard: refuse if this email already has a COMPLETED account (a profile
+  // with a role filled in). A bare trigger-created profile from a failed
+  // earlier invite doesn't block a retry.
   const { data: existing } = await admin
     .from("profiles")
-    .select("id")
+    .select("id, role, full_name")
     .eq("email", email)
     .maybeSingle();
-  if (existing) {
+  if (existing && existing.role && existing.full_name) {
     redirect(
       "/add-dentist?error=" +
         encodeURIComponent("An account already exists for that email. Use a different address.")
@@ -87,15 +94,20 @@ async function addDentist(formData) {
     redirect("/add-dentist?error=" + encodeURIComponent(msg));
   }
 
-  // File their profile, linked to the practice.
-  const { error: profErr } = await admin.from("profiles").insert({
-    id: invited.user.id,
-    role: "dentist",
-    full_name: fullName,
-    email,
-    phone: phone || null,
-    practice_id: resolvedPracticeId,
-  });
+  // File their profile, linked to the practice. UPSERT, not insert — the
+  // on_auth_user_created trigger has already made a bare row with this id,
+  // so we fill it in rather than collide with it.
+  const { error: profErr } = await admin.from("profiles").upsert(
+    {
+      id: invited.user.id,
+      role: "dentist",
+      full_name: fullName,
+      email,
+      phone: phone || null,
+      practice_id: resolvedPracticeId,
+    },
+    { onConflict: "id" }
+  );
   if (profErr) {
     redirect("/add-dentist?error=" + encodeURIComponent(profErr.message));
   }
