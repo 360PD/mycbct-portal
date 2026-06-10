@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-// v5 — adds Practices button to the staff action row.
-// Otherwise identical to v4: staff search + filters, queue, stats;
-// dentist view unchanged.
+// v6 — adds Diary button to the staff action row.
+// Otherwise identical to v5: staff search + filters, queue, stats,
+// Practices button; dentist view unchanged.
 
 // Supabase embeds can come back as an object or a single-item array
 // depending on how it reads the relationship; normalise to one record.
@@ -290,6 +290,7 @@ export default async function DashboardPage({ searchParams }) {
             <div className="db-head">
               <h2>Action queue</h2>
               <div className="db-actions">
+                <a className="db-new ghost" href="/diary">Diary</a>
                 <a className="db-new ghost" href="/practices">Practices</a>
                 <a className="db-new ghost" href="/add-dentist">Add a dentist</a>
                 <a className="db-new" href="/refer">New referral</a>
