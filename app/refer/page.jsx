@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ReferralForm from "@/components/ReferralForm";
 
-// v3 — staff get the practice list for the picker.
+// v3.1 — staff get the practice list for the picker (plain JS).
 // Staff/admin can always open the form (their profile has no practice;
 // they choose one per referral). Dentists work exactly as before.
 // Still hides the legacy "CBCT — historical" type from the picker.
@@ -33,7 +33,7 @@ export default async function ReferPage() {
   }
 
   // Staff choose the practice per referral, so load the full list for them.
-  let practices: { id: string; name: string }[] = [];
+  let practices = [];
   if (isStaff) {
     const { data: rows } = await supabase
       .from("practices")
