@@ -1,406 +1,128 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 
-// v5 — adds Practices button to the staff action row.
-// Otherwise identical to v4: staff search + filters, queue, stats;
-// dentist view unchanged.
+// Practices overview — staff/admin only.
+// Lists every practice with its dentist-login count and referral count.
+// Clicking a practice opens the dashboard filtered to it.
 
-// Supabase embeds can come back as an object or a single-item array
-// depending on how it reads the relationship; normalise to one record.
-function one(v) {
-  if (Array.isArray(v)) return v[0] ?? null;
-  return v ?? null;
+export const dynamic = "force-dynamic";
+
+function adminClient() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createAdminClient(url, key, { auth: { persistSession: false } });
 }
 
-const STATUS_LABEL = {
-  submitted: "Submitted",
-  booked: "Booked",
-  scanned: "Scanned",
-  delivered: "Delivered",
-  invoiced: "Invoiced",
-  cancelled: "Cancelled",
-};
-
-const DAY = 24 * 60 * 60 * 1000;
-
-function daysWaiting(iso) {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / DAY);
+function countOf(v) {
+  if (Array.isArray(v)) return v[0]?.count ?? 0;
+  return v?.count ?? 0;
 }
 
-function waitLabel(d) {
-  if (d <= 0) return "Today";
-  if (d === 1) return "1 day";
-  return d + " days";
-}
-
-// Strip characters that would break the PostgREST or() filter string.
-function cleanSearch(s) {
-  return String(s || "").replace(/[,%()]/g, " ").trim();
-}
-
-export default async function DashboardPage({ searchParams }) {
-  const sp = (await searchParams) || {};
-  const q = cleanSearch(sp.q);
-  const statusFilter = String(sp.status || "").trim();
-  const practiceFilter = String(sp.practice || "").trim();
-  const filtering = !!(q || statusFilter || practiceFilter);
-
+export default async function PracticesPage() {
   const supabase = await createClient();
 
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
-  if (!claims) redirect("/sign-in?next=/dashboard");
+  if (!claims) redirect("/sign-in?next=/practices");
 
-  const { data: profile } = await supabase
+  const { data: me } = await supabase
     .from("profiles")
-    .select("full_name, role, email, practices(name)")
+    .select("role")
     .eq("id", claims.sub)
     .single();
+  const role = me?.role;
+  if (role !== "staff" && role !== "admin") redirect("/dashboard");
 
-  const name = profile?.full_name || claims.email || "there";
-  const role = profile?.role || "dentist";
-  const email = profile?.email || claims.email || "";
-  const practiceName = one(profile?.practices)?.name || null;
-  const isStaff = role === "staff" || role === "admin";
-
-  const fmtDate = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-
-  // ---------- Referrals list (searchable for staff) ----------
-  // If searching by patient name, find matching patient ids first — this is
-  // the reliable way to search an embedded relationship server-side.
-  let patientIds = null;
-  if (isStaff && q) {
-    const { data: pats } = await supabase
-      .from("patients")
-      .select("id")
-      .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`)
-      .limit(500);
-    patientIds = (pats || []).map((p) => p.id);
+  const admin = adminClient();
+  let practices = [];
+  if (admin) {
+    const { data: rows } = await admin
+      .from("practices")
+      .select("id, name, profiles(count), referrals(count)")
+      .order("name", { ascending: true });
+    practices = (rows || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      dentists: countOf(p.profiles),
+      referrals: countOf(p.referrals),
+    }));
   }
 
-  let rows = [];
-  let noMatches = false;
-  if (patientIds && patientIds.length === 0) {
-    noMatches = true;
-  } else {
-    let query = supabase
-      .from("referrals")
-      .select(
-        "id, status, created_at, report_requested, signature_name, " +
-          "patients(first_name, last_name), scan_types(name), practices(name)"
-      )
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (patientIds) query = query.in("patient_id", patientIds);
-    if (isStaff && statusFilter) query = query.eq("status", statusFilter);
-    if (isStaff && practiceFilter) query = query.eq("practice_id", practiceFilter);
-
-    const { data: referrals } = await query;
-    rows = (referrals || []).map((r) => {
-      const pat = one(r.patients);
-      const st = one(r.scan_types);
-      const pr = one(r.practices);
-      return {
-        id: r.id,
-        status: r.status,
-        reportRequested: !!r.report_requested,
-        created: r.created_at,
-        patientName: pat ? `${pat.first_name} ${pat.last_name}` : "—",
-        scanType: st?.name || "—",
-        practice: pr?.name || "—",
-        referredBy: r.signature_name || "—",
-      };
-    });
-  }
-
-  // ---------- Staff only: queue, stats, practices for the filter ----------
-  let queue = [];
-  let stats = null;
-  let practiceOptions = [];
-  if (isStaff) {
-    const { data: pending } = await supabase
-      .from("referrals")
-      .select(
-        "id, status, created_at, " +
-          "patients(first_name, last_name), scan_types(name), practices(name), scans(id)"
-      )
-      .in("status", ["submitted", "booked"])
-      .order("created_at", { ascending: true })
-      .limit(100);
-
-    queue = (pending || [])
-      .filter((r) => !(r.scans || []).length)
-      .map((r) => {
-        const pat = one(r.patients);
-        const st = one(r.scan_types);
-        const pr = one(r.practices);
-        const d = daysWaiting(r.created_at);
-        return {
-          id: r.id,
-          patientName: pat ? `${pat.first_name} ${pat.last_name}` : "—",
-          scanType: st?.name || "—",
-          practice: pr?.name || "—",
-          days: d,
-          urgency: d >= 7 ? "red" : d >= 3 ? "amber" : "",
-        };
-      });
-
-    const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
-    const [{ count: refsWeek }, { count: scansWeek }, practicesRes] =
-      await Promise.all([
-        supabase
-          .from("referrals")
-          .select("id", { count: "exact", head: true })
-          .gte("created_at", weekAgo),
-        supabase
-          .from("scans")
-          .select("id", { count: "exact", head: true })
-          .gte("uploaded_at", weekAgo),
-        supabase.from("practices").select("id, name").order("name"),
-      ]);
-
-    stats = {
-      awaiting: queue.length,
-      refsWeek: refsWeek ?? 0,
-      scansWeek: scansWeek ?? 0,
-    };
-    practiceOptions = practicesRes.data || [];
-  }
-
-  const listHeading = isStaff
-    ? filtering
-      ? "Search results"
-      : "Recent referrals"
-    : practiceName
-      ? `Referrals at ${practiceName}`
-      : "Your referrals";
+  const totalDentists = practices.reduce((n, p) => n + p.dentists, 0);
+  const totalReferrals = practices.reduce((n, p) => n + p.referrals, 0);
 
   return (
-    <main className="db-root">
+    <main className="pr-root">
       <style>{`
-        .db-root{min-height:100vh;background:#0e1b2e;color:#f7f4ec;
+        .pr-root{min-height:100vh;background:#0e1b2e;color:#f7f4ec;
           font-family:"DM Sans",system-ui,sans-serif;}
-        .db-bar{display:flex;align-items:center;justify-content:space-between;
+        .pr-bar{display:flex;align-items:center;justify-content:space-between;
           padding:20px clamp(20px,5vw,56px);border-bottom:1px solid rgba(231,174,59,.18);}
-        .db-brand{font-family:"Fraunces",Georgia,serif;font-size:22px;font-weight:600;letter-spacing:.2px;}
-        .db-brand .by{display:block;font-family:"DM Sans",sans-serif;font-size:11px;
+        .pr-brand{font-family:"Fraunces",Georgia,serif;font-size:22px;font-weight:600;letter-spacing:.2px;}
+        .pr-brand .by{display:block;font-family:"DM Sans",sans-serif;font-size:11px;
           letter-spacing:.16em;text-transform:uppercase;color:#e7ae3b;margin-top:2px;}
-        .db-out{appearance:none;border:1px solid rgba(247,244,236,.28);background:transparent;
-          color:#f7f4ec;font:inherit;font-size:14px;padding:9px 16px;border-radius:999px;cursor:pointer;}
-        .db-out:hover{border-color:#e7ae3b;color:#e7ae3b;}
-        .db-wrap{max-width:1020px;margin:0 auto;padding:clamp(32px,6vw,60px) clamp(20px,5vw,56px);}
-        .db-hi{font-family:"Fraunces",Georgia,serif;font-size:clamp(26px,4.5vw,38px);line-height:1.1;margin:0 0 8px;}
-        .db-meta{color:rgba(247,244,236,.5);font-size:13px;margin:0 0 36px;}
-        .db-meta b{color:#e7ae3b;font-weight:600;text-transform:capitalize;}
-        .db-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px;flex-wrap:wrap;}
-        .db-head h2{font-family:"Fraunces",Georgia,serif;font-size:22px;margin:0;}
-        .db-count{font-family:"DM Sans",sans-serif;font-size:14px;color:rgba(247,244,236,.5);font-weight:400;}
-        .db-clear{font-size:14px;color:#e7ae3b;text-decoration:none;margin-left:10px;}
-        .db-clear:hover{text-decoration:underline;}
-        .db-actions{display:flex;gap:10px;flex-wrap:wrap;}
-        .db-new{display:inline-block;background:#e7ae3b;color:#0e1b2e;font-weight:600;font-size:15px;
-          text-decoration:none;padding:11px 22px;border-radius:999px;white-space:nowrap;}
-        .db-new:hover{filter:brightness(1.05);}
-        .db-new.ghost{background:transparent;color:#e7ae3b;border:1px solid rgba(231,174,59,.5);}
-        .db-new.ghost:hover{background:rgba(231,174,59,.1);}
-        .db-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 0 36px;}
-        .db-stat{background:rgba(247,244,236,.04);border:1px solid rgba(247,244,236,.09);
-          border-radius:16px;padding:18px 20px;}
-        .db-stat .n{font-family:"Fraunces",Georgia,serif;font-size:32px;line-height:1;color:#e7ae3b;}
-        .db-stat .l{font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;
-          color:rgba(247,244,236,.5);margin-top:8px;}
-        @media(max-width:640px){.db-stats{grid-template-columns:1fr;}}
-        .db-search{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px;}
-        .db-search input,.db-search select{background:#13233c;border:1px solid rgba(247,244,236,.18);
-          border-radius:999px;padding:11px 18px;color:#f7f4ec;font:inherit;font-size:14.5px;}
-        .db-search input{flex:1;min-width:200px;}
-        .db-search input::placeholder{color:rgba(247,244,236,.4);}
-        .db-search input:focus,.db-search select:focus{outline:none;border-color:#e7ae3b;}
-        .db-search select{cursor:pointer;max-width:260px;}
-        .db-search button{appearance:none;border:none;background:#e7ae3b;color:#0e1b2e;font:inherit;
-          font-weight:600;font-size:14.5px;padding:11px 24px;border-radius:999px;cursor:pointer;}
-        .db-search button:hover{filter:brightness(1.05);}
-        .db-empty{background:rgba(247,244,236,.04);border:1px dashed rgba(231,174,59,.3);
-          border-radius:16px;padding:40px 28px;text-align:center;color:rgba(247,244,236,.7);}
-        .db-empty p{margin:0 0 18px;font-size:15px;}
-        .db-empty p:last-child{margin-bottom:0;}
-        .db-empty.ok{border-color:rgba(54,184,134,.4);color:#9fe2c3;padding:26px 28px;}
-        .db-empty.ok p{margin:0;}
-        .db-list{border:1px solid rgba(231,174,59,.16);border-radius:16px;overflow:hidden;margin-bottom:44px;}
-        .db-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr .8fr;gap:12px;align-items:center;
-          padding:16px 20px;border-bottom:1px solid rgba(247,244,236,.07);font-size:15px;}
-        .db-row:last-child{border-bottom:none;}
-        a.db-row{color:inherit;text-decoration:none;cursor:pointer;transition:background .12s ease;}
-        a.db-row:hover{background:rgba(247,244,236,.05);}
-        .db-row.head{background:rgba(247,244,236,.04);font-size:12px;letter-spacing:.12em;
+        .pr-back{color:rgba(247,244,236,.7);text-decoration:none;font-size:14px;}
+        .pr-back:hover{color:#e7ae3b;}
+        .pr-wrap{max-width:880px;margin:0 auto;padding:clamp(32px,6vw,60px) clamp(20px,5vw,56px);}
+        .pr-h1{font-family:"Fraunces",Georgia,serif;font-size:clamp(26px,4.5vw,36px);margin:0 0 8px;}
+        .pr-meta{color:rgba(247,244,236,.5);font-size:14px;margin:0 0 32px;}
+        .pr-head-actions{display:flex;justify-content:flex-end;margin:0 0 16px;}
+        .pr-add{display:inline-block;background:transparent;color:#e7ae3b;font-weight:600;font-size:14.5px;
+          text-decoration:none;padding:10px 20px;border-radius:999px;border:1px solid rgba(231,174,59,.5);}
+        .pr-add:hover{background:rgba(231,174,59,.1);}
+        .pr-list{border:1px solid rgba(231,174,59,.16);border-radius:16px;overflow:hidden;}
+        .pr-row{display:grid;grid-template-columns:2.2fr .8fr .8fr;gap:12px;align-items:center;
+          padding:15px 20px;border-bottom:1px solid rgba(247,244,236,.07);font-size:15px;}
+        .pr-row:last-child{border-bottom:none;}
+        a.pr-row{color:inherit;text-decoration:none;transition:background .12s ease;}
+        a.pr-row:hover{background:rgba(247,244,236,.05);}
+        .pr-row.head{background:rgba(247,244,236,.04);font-size:12px;letter-spacing:.12em;
           text-transform:uppercase;color:rgba(247,244,236,.5);font-weight:600;}
-        .db-pat{font-weight:600;}
-        .db-sub{color:rgba(247,244,236,.55);font-size:13px;}
-        .db-badge{display:inline-block;font-size:12px;font-weight:600;padding:4px 11px;border-radius:999px;
-          background:rgba(231,174,59,.16);color:#e7ae3b;}
-        .db-badge.delivered{background:rgba(54,184,134,.16);color:#36b886;}
-        .db-badge.cancelled{background:rgba(247,244,236,.1);color:rgba(247,244,236,.55);}
-        .db-wait{display:inline-block;font-size:12.5px;font-weight:600;padding:4px 11px;border-radius:999px;
-          background:rgba(247,244,236,.1);color:rgba(247,244,236,.75);}
-        .db-wait.amber{background:rgba(231,174,59,.2);color:#e7ae3b;}
-        .db-wait.red{background:rgba(255,110,110,.18);color:#ff9b9b;}
-        .db-up{flex:none;font-size:13.5px;font-weight:600;color:#e7ae3b;}
-        @media(max-width:720px){
-          .db-row{grid-template-columns:1fr auto;}
-          .db-row .db-when,.db-row .db-type,.db-row .db-who{display:none;}
-          .db-row.head{display:none;}
+        .pr-name{font-weight:600;}
+        .pr-n{color:rgba(247,244,236,.75);}
+        .pr-zero{color:rgba(247,244,236,.35);}
+        .pr-pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;
+          background:rgba(231,174,59,.16);color:#e7ae3b;margin-left:8px;}
+        @media(max-width:560px){
+          .pr-row{grid-template-columns:1.6fr .7fr .7fr;font-size:14px;padding:13px 14px;}
         }
       `}</style>
 
-      <header className="db-bar">
-        <div className="db-brand">MyCBCT<span className="by">by 360 Visualise</span></div>
-        <form action="/auth/sign-out" method="post">
-          <button className="db-out" type="submit">Sign out</button>
-        </form>
+      <header className="pr-bar">
+        <div className="pr-brand">MyCBCT<span className="by">by 360 Visualise</span></div>
+        <a className="pr-back" href="/dashboard">&larr; Dashboard</a>
       </header>
 
-      <div className="db-wrap">
-        <h1 className="db-hi">Welcome back, {name}.</h1>
-        <p className="db-meta">{email} &middot; role: <b>{role}</b></p>
+      <div className="pr-wrap">
+        <h1 className="pr-h1">Practices</h1>
+        <p className="pr-meta">
+          {practices.length} practices &middot; {totalDentists} dentist logins &middot;{" "}
+          {totalReferrals.toLocaleString("en-GB")} referrals. Click a practice to see its referrals.
+        </p>
 
-        {/* ================= STAFF / ADMIN VIEW ================= */}
-        {isStaff && (
-          <>
-            <div className="db-stats">
-              <div className="db-stat">
-                <div className="n">{stats.awaiting}</div>
-                <div className="l">Awaiting scan</div>
-              </div>
-              <div className="db-stat">
-                <div className="n">{stats.refsWeek}</div>
-                <div className="l">Referrals this week</div>
-              </div>
-              <div className="db-stat">
-                <div className="n">{stats.scansWeek}</div>
-                <div className="l">Scans uploaded this week</div>
-              </div>
-            </div>
-
-            <div className="db-head">
-              <h2>Action queue</h2>
-              <div className="db-actions">
-                <a className="db-new ghost" href="/practices">Practices</a>
-                <a className="db-new ghost" href="/add-dentist">Add a dentist</a>
-                <a className="db-new" href="/refer">New referral</a>
-              </div>
-            </div>
-
-            {queue.length === 0 ? (
-              <div className="db-empty ok" style={{ marginBottom: "44px" }}>
-                <p>All caught up — every referral has its scan. &#10003;</p>
-              </div>
-            ) : (
-              <div className="db-list">
-                <div className="db-row head">
-                  <span>Patient</span>
-                  <span className="db-type">Scan</span>
-                  <span className="db-who">Practice</span>
-                  <span>Waiting</span>
-                  <span className="db-when"></span>
-                </div>
-                {queue.map((q2) => (
-                  <a className="db-row" key={q2.id} href={"/referrals/" + q2.id}>
-                    <span className="db-pat">{q2.patientName}</span>
-                    <span className="db-type">{q2.scanType}</span>
-                    <span className="db-who db-sub">{q2.practice}</span>
-                    <span>
-                      <span className={"db-wait " + q2.urgency}>{waitLabel(q2.days)}</span>
-                    </span>
-                    <span className="db-when db-up">Upload scan &rarr;</span>
-                  </a>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ================= REFERRALS LIST (both roles) ================= */}
-        <div className="db-head">
-          <h2>
-            {listHeading}
-            {isStaff && filtering && !noMatches && (
-              <span className="db-count"> &middot; {rows.length}{rows.length === 50 ? "+" : ""} found</span>
-            )}
-            {isStaff && filtering && (
-              <a className="db-clear" href="/dashboard">Clear</a>
-            )}
-          </h2>
-          {!isStaff && <a className="db-new" href="/refer">New referral</a>}
+        <div className="pr-head-actions">
+          <a className="pr-add" href="/add-dentist">Add a dentist</a>
         </div>
 
-        {isStaff && (
-          <form className="db-search" method="get" action="/dashboard">
-            <input
-              type="text"
-              name="q"
-              defaultValue={q}
-              placeholder="Search patients by name&hellip;"
-            />
-            <select name="status" defaultValue={statusFilter}>
-              <option value="">All statuses</option>
-              {Object.entries(STATUS_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-            <select name="practice" defaultValue={practiceFilter}>
-              <option value="">All practices</option>
-              {practiceOptions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <button type="submit">Search</button>
-          </form>
-        )}
-
-        {noMatches || rows.length === 0 ? (
-          <div className="db-empty">
-            {filtering ? (
-              <p>No referrals match that search. <a className="db-clear" href="/dashboard">Clear filters</a></p>
-            ) : (
-              <>
-                <p>No referrals yet. Send your first patient through in under a minute.</p>
-                <a className="db-new" href="/refer">Refer a patient</a>
-              </>
-            )}
+        <div className="pr-list">
+          <div className="pr-row head">
+            <span>Practice</span>
+            <span>Dentists</span>
+            <span>Referrals</span>
           </div>
-        ) : (
-          <div className="db-list">
-            <div className="db-row head">
-              <span>Patient</span>
-              <span className="db-type">Scan</span>
-              <span className="db-who">{isStaff ? "Practice" : "Referred by"}</span>
-              <span>Status</span>
-              <span className="db-when">Referred</span>
-            </div>
-            {rows.map((r) => (
-              <a className="db-row" key={r.id} href={"/referrals/" + r.id}>
-                <span>
-                  <span className="db-pat">{r.patientName}</span>
-                  {r.reportRequested && <span className="db-sub"> &middot; report requested</span>}
-                </span>
-                <span className="db-type">{r.scanType}</span>
-                <span className="db-who db-sub">{isStaff ? r.practice : r.referredBy}</span>
-                <span>
-                  <span className={"db-badge " + r.status}>
-                    {STATUS_LABEL[r.status] || r.status}
-                  </span>
-                </span>
-                <span className="db-when db-sub">{fmtDate(r.created)}</span>
-              </a>
-            ))}
-          </div>
-        )}
+          {practices.map((p) => (
+            <a className="pr-row" key={p.id} href={"/dashboard?practice=" + p.id}>
+              <span className="pr-name">
+                {p.name}
+                {p.dentists === 0 && <span className="pr-pill">No logins yet</span>}
+              </span>
+              <span className={p.dentists ? "pr-n" : "pr-zero"}>{p.dentists}</span>
+              <span className="pr-n">{p.referrals.toLocaleString("en-GB")}</span>
+            </a>
+          ))}
+        </div>
       </div>
     </main>
   );
