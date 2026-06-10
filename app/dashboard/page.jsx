@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-// v6 — adds Diary button to the staff action row.
-// Otherwise identical to v5: staff search + filters, queue, stats,
-// Practices button; dentist view unchanged.
+// v7 — action queue shows appointment times and Book buttons.
+// Unbooked queue rows get a gold Book button straight to the booking
+// calendar; booked rows show their appointment time. Otherwise v6.
 
 // Supabase embeds can come back as an object or a single-item array
 // depending on how it reads the relationship; normalise to one record.
@@ -31,6 +31,17 @@ function waitLabel(d) {
   if (d <= 0) return "Today";
   if (d === 1) return "1 day";
   return d + " days";
+}
+
+function fmtShortAppt(iso) {
+  return new Date(iso).toLocaleString("en-GB", {
+    timeZone: "Europe/London",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // Strip characters that would break the PostgREST or() filter string.
@@ -128,7 +139,8 @@ export default async function DashboardPage({ searchParams }) {
       .from("referrals")
       .select(
         "id, status, created_at, " +
-          "patients(first_name, last_name), scan_types(name), practices(name), scans(id)"
+          "patients(first_name, last_name), scan_types(name), practices(name), scans(id), " +
+          "appointments(starts_at, status)"
       )
       .in("status", ["submitted", "booked"])
       .order("created_at", { ascending: true })
@@ -141,6 +153,7 @@ export default async function DashboardPage({ searchParams }) {
         const st = one(r.scan_types);
         const pr = one(r.practices);
         const d = daysWaiting(r.created_at);
+        const appt = (r.appointments || []).find((a) => a.status === "booked") || null;
         return {
           id: r.id,
           patientName: pat ? `${pat.first_name} ${pat.last_name}` : "—",
@@ -148,6 +161,7 @@ export default async function DashboardPage({ searchParams }) {
           practice: pr?.name || "—",
           days: d,
           urgency: d >= 7 ? "red" : d >= 3 ? "amber" : "",
+          apptAt: appt ? appt.starts_at : null,
         };
       });
 
@@ -233,11 +247,15 @@ export default async function DashboardPage({ searchParams }) {
         .db-empty.ok{border-color:rgba(54,184,134,.4);color:#9fe2c3;padding:26px 28px;}
         .db-empty.ok p{margin:0;}
         .db-list{border:1px solid rgba(231,174,59,.16);border-radius:16px;overflow:hidden;margin-bottom:44px;}
-        .db-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr .8fr;gap:12px;align-items:center;
-          padding:16px 20px;border-bottom:1px solid rgba(247,244,236,.07);font-size:15px;}
+        .db-row{display:grid;grid-template-columns:1.4fr 1fr 1fr .9fr 1fr;gap:12px;align-items:center;
+          padding:16px 20px;border-bottom:1px solid rgba(247,244,236,.07);font-size:15px;
+          position:relative;}
         .db-row:last-child{border-bottom:none;}
         a.db-row{color:inherit;text-decoration:none;cursor:pointer;transition:background .12s ease;}
         a.db-row:hover{background:rgba(247,244,236,.05);}
+        .db-row.linked{transition:background .12s ease;}
+        .db-row.linked:hover{background:rgba(247,244,236,.05);}
+        .db-rowlink{position:absolute;inset:0;z-index:0;}
         .db-row.head{background:rgba(247,244,236,.04);font-size:12px;letter-spacing:.12em;
           text-transform:uppercase;color:rgba(247,244,236,.5);font-weight:600;}
         .db-pat{font-weight:600;}
@@ -250,7 +268,11 @@ export default async function DashboardPage({ searchParams }) {
           background:rgba(247,244,236,.1);color:rgba(247,244,236,.75);}
         .db-wait.amber{background:rgba(231,174,59,.2);color:#e7ae3b;}
         .db-wait.red{background:rgba(255,110,110,.18);color:#ff9b9b;}
-        .db-up{flex:none;font-size:13.5px;font-weight:600;color:#e7ae3b;}
+        .db-book{position:relative;z-index:1;display:inline-block;background:#e7ae3b;color:#0e1b2e;
+          font-weight:600;font-size:13px;text-decoration:none;padding:7px 16px;border-radius:999px;
+          white-space:nowrap;justify-self:start;}
+        .db-book:hover{filter:brightness(1.05);}
+        .db-appt{font-size:13.5px;font-weight:600;color:#e7ae3b;white-space:nowrap;}
         @media(max-width:720px){
           .db-row{grid-template-columns:1fr auto;}
           .db-row .db-when,.db-row .db-type,.db-row .db-who{display:none;}
@@ -261,148 +283,4 @@ export default async function DashboardPage({ searchParams }) {
       <header className="db-bar">
         <div className="db-brand">MyCBCT<span className="by">by 360 Visualise</span></div>
         <form action="/auth/sign-out" method="post">
-          <button className="db-out" type="submit">Sign out</button>
-        </form>
-      </header>
-
-      <div className="db-wrap">
-        <h1 className="db-hi">Welcome back, {name}.</h1>
-        <p className="db-meta">{email} &middot; role: <b>{role}</b></p>
-
-        {/* ================= STAFF / ADMIN VIEW ================= */}
-        {isStaff && (
-          <>
-            <div className="db-stats">
-              <div className="db-stat">
-                <div className="n">{stats.awaiting}</div>
-                <div className="l">Awaiting scan</div>
-              </div>
-              <div className="db-stat">
-                <div className="n">{stats.refsWeek}</div>
-                <div className="l">Referrals this week</div>
-              </div>
-              <div className="db-stat">
-                <div className="n">{stats.scansWeek}</div>
-                <div className="l">Scans uploaded this week</div>
-              </div>
-            </div>
-
-            <div className="db-head">
-              <h2>Action queue</h2>
-              <div className="db-actions">
-                <a className="db-new ghost" href="/diary">Diary</a>
-                <a className="db-new ghost" href="/practices">Practices</a>
-                <a className="db-new ghost" href="/add-dentist">Add a dentist</a>
-                <a className="db-new" href="/refer">New referral</a>
-              </div>
-            </div>
-
-            {queue.length === 0 ? (
-              <div className="db-empty ok" style={{ marginBottom: "44px" }}>
-                <p>All caught up — every referral has its scan. &#10003;</p>
-              </div>
-            ) : (
-              <div className="db-list">
-                <div className="db-row head">
-                  <span>Patient</span>
-                  <span className="db-type">Scan</span>
-                  <span className="db-who">Practice</span>
-                  <span>Waiting</span>
-                  <span className="db-when"></span>
-                </div>
-                {queue.map((q2) => (
-                  <a className="db-row" key={q2.id} href={"/referrals/" + q2.id}>
-                    <span className="db-pat">{q2.patientName}</span>
-                    <span className="db-type">{q2.scanType}</span>
-                    <span className="db-who db-sub">{q2.practice}</span>
-                    <span>
-                      <span className={"db-wait " + q2.urgency}>{waitLabel(q2.days)}</span>
-                    </span>
-                    <span className="db-when db-up">Upload scan &rarr;</span>
-                  </a>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ================= REFERRALS LIST (both roles) ================= */}
-        <div className="db-head">
-          <h2>
-            {listHeading}
-            {isStaff && filtering && !noMatches && (
-              <span className="db-count"> &middot; {rows.length}{rows.length === 50 ? "+" : ""} found</span>
-            )}
-            {isStaff && filtering && (
-              <a className="db-clear" href="/dashboard">Clear</a>
-            )}
-          </h2>
-          {!isStaff && <a className="db-new" href="/refer">New referral</a>}
-        </div>
-
-        {isStaff && (
-          <form className="db-search" method="get" action="/dashboard">
-            <input
-              type="text"
-              name="q"
-              defaultValue={q}
-              placeholder="Search patients by name&hellip;"
-            />
-            <select name="status" defaultValue={statusFilter}>
-              <option value="">All statuses</option>
-              {Object.entries(STATUS_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-            <select name="practice" defaultValue={practiceFilter}>
-              <option value="">All practices</option>
-              {practiceOptions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <button type="submit">Search</button>
-          </form>
-        )}
-
-        {noMatches || rows.length === 0 ? (
-          <div className="db-empty">
-            {filtering ? (
-              <p>No referrals match that search. <a className="db-clear" href="/dashboard">Clear filters</a></p>
-            ) : (
-              <>
-                <p>No referrals yet. Send your first patient through in under a minute.</p>
-                <a className="db-new" href="/refer">Refer a patient</a>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="db-list">
-            <div className="db-row head">
-              <span>Patient</span>
-              <span className="db-type">Scan</span>
-              <span className="db-who">{isStaff ? "Practice" : "Referred by"}</span>
-              <span>Status</span>
-              <span className="db-when">Referred</span>
-            </div>
-            {rows.map((r) => (
-              <a className="db-row" key={r.id} href={"/referrals/" + r.id}>
-                <span>
-                  <span className="db-pat">{r.patientName}</span>
-                  {r.reportRequested && <span className="db-sub"> &middot; report requested</span>}
-                </span>
-                <span className="db-type">{r.scanType}</span>
-                <span className="db-who db-sub">{isStaff ? r.practice : r.referredBy}</span>
-                <span>
-                  <span className={"db-badge " + r.status}>
-                    {STATUS_LABEL[r.status] || r.status}
-                  </span>
-                </span>
-                <span className="db-when db-sub">{fmtDate(r.created)}</span>
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
-    </main>
-  );
-}
+          <button classNa
