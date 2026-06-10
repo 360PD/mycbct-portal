@@ -4,7 +4,7 @@ import { presignView } from "@/lib/backblaze";
 import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
 
-// v2.1 — shows the booked appointment date + booking links.
+// v2.2 — shows the booked appointment date + booking links.
 // Staff see Manage booking / Book appointment; dentists see the date
 // (read-only, via the practice-scoped RLS policy added 10 June).
 
@@ -138,6 +138,8 @@ export default async function ReferralDetailPage({ params }) {
     );
   }
 
+  const bookHref = "/referrals/" + id + "/book";
+
   return (
     <main className="rd">
       <div className="rd-inner">
@@ -157,18 +159,14 @@ export default async function ReferralDetailPage({ params }) {
             <span className="rd-appt-text">
               Scan appointment: <b>{fmtApptTime(appt.starts_at)}</b>
             </span>
-            {canUpload && (
-              <a className="rd-appt-link" href={"/referrals/" + id + "/book"}>
-                Manage booking
-              </a>
-            )}
+            {canUpload ? (
+              <a className="rd-appt-link" href={bookHref}>Manage booking</a>
+            ) : null}
           </div>
         ) : canUpload && (ref.status === "submitted" || ref.status === "booked") ? (
           <div className="rd-appt none">
             <span className="rd-appt-text">No appointment booked yet.</span>
-            <a className="rd-appt-link" href={"/referrals/" + id + "/book"}>
-              Book appointment
-            </a>
+            <a className="rd-appt-link" href={bookHref}>Book appointment</a>
           </div>
         ) : null}
 
@@ -209,12 +207,12 @@ export default async function ReferralDetailPage({ params }) {
             </div>
           </dl>
 
-          {ref.clinical_notes && (
+          {ref.clinical_notes ? (
             <div className="rd-notes">
               <dt>Clinical notes</dt>
               <dd>{ref.clinical_notes}</dd>
             </div>
-          )}
+          ) : null}
         </section>
 
         <section className="rd-card">
@@ -249,21 +247,11 @@ export default async function ReferralDetailPage({ params }) {
                     </a>
                   </div>
 
-                  {isCbct && <ScanViewer scanId={s.id} />}
+                  {isCbct ? <ScanViewer scanId={s.id} /> : null}
 
                   {!isCbct && imageUrls[s.id] ? (
-                    
-                      className="rd-opg-link"
-                      href={imageUrls[s.id]}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <img
-                        className="rd-opg"
-                        src={imageUrls[s.id]}
-                        alt={"OPG image for " + patientName}
-                        loading="lazy"
-                      />
+                    <a className="rd-opg-link" href={imageUrls[s.id]} target="_blank" rel="noopener noreferrer">
+                      <img className="rd-opg" src={imageUrls[s.id]} alt={"OPG image for " + patientName} loading="lazy" />
                     </a>
                   ) : null}
                 </li>
@@ -271,7 +259,7 @@ export default async function ReferralDetailPage({ params }) {
             </ul>
           )}
 
-          {canUpload && <ScanUploader referralId={id} />}
+          {canUpload ? <ScanUploader referralId={id} /> : null}
         </section>
       </div>
 
