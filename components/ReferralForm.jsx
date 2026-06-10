@@ -4,16 +4,18 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createReferral } from "@/app/refer/actions";
 
+// v2 — staff practice picker + referring-dentist signature.
+// Staff/admin choose the practice per referral and type the referring
+// dentist's name. Dentists see the form exactly as before.
+
 /**
- * MyCBCT — Referral form (Phase 2).
- * Wired to the createReferral server action: creates a patient + referral,
- * stamped with the signed-in dentist, scoped to their practice by RLS.
- *
- * Props (from app/refer/page.tsx):
- *   hasPractice  : boolean  — is the dentist linked to a practice yet?
+ * Props (from app/refer/page.jsx):
+ *   hasPractice  : boolean  — can this user create referrals?
  *   practiceName : string|null
- *   dentistName  : string   — default for the signature
+ *   dentistName  : string   — default for the signature (dentists only)
  *   scanTypes    : [{ id, code, name, description, base_price }]
+ *   isStaff      : boolean  — staff/admin get the practice picker
+ *   practices    : [{ id, name }] — staff only
  */
 
 const SEX = [
@@ -49,10 +51,16 @@ export default function ReferralForm({
   practiceName,
   dentistName = "",
   scanTypes = [],
+  isStaff = false,
+  practices = [],
 }) {
   const router = useRouter();
 
+  // Staff sign with the REFERRING dentist's name, so start blank for them.
+  const defaultSignature = isStaff ? "" : dentistName || "";
+
   const [f, setF] = useState({
+    practiceId: "",
     firstName: "",
     lastName: "",
     dob: "",
@@ -63,7 +71,7 @@ export default function ReferralForm({
     regionOfInterest: "",
     clinicalNotes: "",
     reportChoice: "", // "self" | "arrange"
-    signatureName: dentistName || "",
+    signatureName: defaultSignature,
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -80,6 +88,7 @@ export default function ReferralForm({
 
   function validate() {
     const e = {};
+    if (isStaff && !f.practiceId) e.practiceId = 1;
     if (!f.firstName.trim()) e.firstName = 1;
     if (!f.lastName.trim()) e.lastName = 1;
     if (!f.dob) e.dob = 1;
@@ -122,6 +131,7 @@ export default function ReferralForm({
         clinicalNotes: notes,
         reportRequested: f.reportChoice === "arrange",
         signatureName: f.signatureName,
+        practiceId: isStaff ? f.practiceId : undefined,
       });
 
       if (res.ok) {
@@ -146,6 +156,7 @@ export default function ReferralForm({
 
   function reset() {
     setF({
+      practiceId: "",
       firstName: "",
       lastName: "",
       dob: "",
@@ -156,7 +167,7 @@ export default function ReferralForm({
       regionOfInterest: "",
       clinicalNotes: "",
       reportChoice: "",
-      signatureName: dentistName || "",
+      signatureName: defaultSignature,
     });
     setErrors({});
     setBanner("");
@@ -218,7 +229,7 @@ export default function ReferralForm({
             <div className="rf-intro">
               <span className="rf-tag">New referral</span>
               <h1>Refer a patient</h1>
-              {practiceName && (
+              {!isStaff && practiceName && (
                 <p className="rf-practice">
                   Referring as <strong>{practiceName}</strong>
                 </p>
@@ -226,6 +237,26 @@ export default function ReferralForm({
             </div>
 
             {banner && <div className="rf-banner">{banner}</div>}
+
+            {/* Practice (staff only) */}
+            {isStaff && (
+              <section className="rf-card">
+                <h2>Practice</h2>
+                <div className="rf-field">
+                  <label>Which practice is this referral for? *</label>
+                  <select
+                    className={"rf-select " + (errors.practiceId ? "err" : "")}
+                    value={f.practiceId}
+                    onChange={(e) => set("practiceId", e.target.value)}
+                  >
+                    <option value="">Choose a practice&hellip;</option>
+                    {practices.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </section>
+            )}
 
             {/* Patient */}
             <section className="rf-card">
@@ -374,8 +405,8 @@ export default function ReferralForm({
                     className={"rf-choice " + (f.reportChoice === "self" ? "on" : "")}
                     onClick={() => set("reportChoice", "self")}
                   >
-                    <span className="t">I&rsquo;ll report this scan myself</span>
-                    <span className="d">You accept responsibility to report this CBCT.</span>
+                    <span className="t">{isStaff ? "Dentist will report this scan" : "I\u2019ll report this scan myself"}</span>
+                    <span className="d">{isStaff ? "The referring dentist accepts responsibility to report this CBCT." : "You accept responsibility to report this CBCT."}</span>
                   </button>
                   <button
                     type="button"
@@ -398,7 +429,12 @@ export default function ReferralForm({
             <section className="rf-card">
               <h2>Confirm</h2>
               <div className="rf-field">
-                <label>Your name (referral signature) *</label>
+                <label>{isStaff ? "Referring dentist's name *" : "Your name (referral signature) *"}</label>
+                {isStaff && (
+                  <p className="rf-help">
+                    The dentist who asked for this scan &mdash; their name goes on the referral.
+                  </p>
+                )}
                 <input
                   className={errors.signatureName ? "err" : ""}
                   value={f.signatureName}
@@ -462,6 +498,11 @@ const styles = `
   box-shadow:0 0 0 3px rgba(231,174,59,.18);}
 .rf-field textarea{resize:vertical;min-height:90px;}
 .rf-field input.err,.rf-field textarea.err{border-color:#d9534f;background:#fdf3f2;}
+
+.rf-select{width:100%;border:1px solid rgba(14,27,46,.18);border-radius:11px;
+  padding:12px 14px;font:inherit;font-size:15px;color:#0e1b2e;background:#fff;cursor:pointer;}
+.rf-select:focus{outline:none;border-color:#e7ae3b;box-shadow:0 0 0 3px rgba(231,174,59,.18);}
+.rf-select.err{border-color:#d9534f;background:#fdf3f2;}
 
 .rf-seg{display:inline-flex;flex-wrap:wrap;gap:8px;}
 .rf-seg.err{outline:2px solid #f1c4bf;outline-offset:3px;border-radius:12px;}
