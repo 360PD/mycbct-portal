@@ -1,7 +1,9 @@
 "use server";
-
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+
+// Who gets the "new referral received" email.
+const NOTIFY = ["pete@360v.co.uk", "rachelh@360v.co.uk"];
 
 export type ReferralInput = {
   firstName: string;
@@ -20,11 +22,60 @@ export type ReferralResult =
   | { ok: true; referralId: string }
   | { ok: false; error: string };
 
+// Best-effort email to the team. Never throws into the caller's path —
+// a mail hiccup must never stop a referral being filed.
+async function notifyTeam(opts: {
+  referralId: string;
+  patientName: string;
+  practiceName: string;
+  scanTypeName: string;
+  signatureName: string;
+  reportRequested: boolean;
+}) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return;
+
+  const ref = opts.referralId.slice(0, 8).toUpperCase();
+  const subject = `New referral: ${opts.patientName} — ${opts.scanTypeName} (${opts.practiceName})`;
+
+  const html = `
+    <h2 style="margin:0 0 12px;">New referral received</h2>
+    <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
+      <tr><td style="padding:4px 14px 4px 0;color:#666;">Reference</td><td style="padding:4px 0;"><strong>${ref}</strong></td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666;">Patient</td><td style="padding:4px 0;"><strong>${opts.patientName}</strong></td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666;">Practice</td><td style="padding:4px 0;">${opts.practiceName}</td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666;">Scan type</td><td style="padding:4px 0;">${opts.scanTypeName}</td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666;">Referred by</td><td style="padding:4px 0;">${opts.signatureName}</td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666;">Consultant report</td><td style="padding:4px 0;">${opts.reportRequested ? "Requested" : "Not requested"}</td></tr>
+    </table>
+    <p style="font-family:Arial,sans-serif;font-size:14px;">
+      <a href="https://mycbct-portal.vercel.app/referrals/${opts.referralId}">Open this referral in MyCBCT</a>
+    </p>
+  `;
+
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "MyCBCT <scans@mycbct.co.uk>",
+        to: NOTIFY,
+        subject,
+        html,
+      }),
+    });
+  } catch {
+    // Swallow — notification is best-effort by design.
+  }
+}
+
 export async function createReferral(
   input: ReferralInput
 ): Promise<ReferralResult> {
   const supabase = await createClient();
-
   const { data: claimsData } = await supabase.auth.getClaims();
   const claims = claimsData?.claims;
   if (!claims) return { ok: false, error: "You're not signed in." };
@@ -36,7 +87,6 @@ export async function createReferral(
     .select("practice_id, full_name")
     .eq("id", userId)
     .single();
-
   if (pErr || !profile) {
     return { ok: false, error: "Could not load your profile." };
   }
@@ -67,7 +117,6 @@ export async function createReferral(
     })
     .select("id")
     .single();
-
   if (patErr || !patient) {
     return { ok: false, error: patErr?.message || "Could not save the patient." };
   }
@@ -90,10 +139,34 @@ export async function createReferral(
     })
     .select("id")
     .single();
-
   if (refErr || !referral) {
     return { ok: false, error: refErr?.message || "Could not save the referral." };
   }
+
+  // 3) Tell the team. Best-effort — happens after the referral is safely
+  // saved, and any failure is swallowed inside notifyTeam.
+  const signature =
+    input.signatureName?.trim() || profile.full_name || "Unknown";
+  const [{ data: practice }, { data: scanType }] = await Promise.all([
+    supabase
+      .from("practices")
+      .select("name")
+      .eq("id", profile.practice_id)
+      .single(),
+    supabase
+      .from("scan_types")
+      .select("name")
+      .eq("id", input.scanTypeId)
+      .single(),
+  ]);
+  await notifyTeam({
+    referralId: referral.id,
+    patientName: `${input.firstName.trim()} ${input.lastName.trim()}`,
+    practiceName: practice?.name || "Unknown practice",
+    scanTypeName: scanType?.name || "Unknown scan type",
+    signatureName: signature,
+    reportRequested: !!input.reportRequested,
+  });
 
   revalidatePath("/dashboard");
   return { ok: true, referralId: referral.id };
