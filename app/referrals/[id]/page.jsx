@@ -4,6 +4,10 @@ import { presignView } from "@/lib/backblaze";
 import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
 
+// v2 — shows the booked appointment date + booking links.
+// Staff see Manage booking / Book appointment; dentists see the date
+// (read-only, via the practice-scoped RLS policy added 10 June).
+
 const STATUS_LABEL = {
   submitted: "Submitted",
   booked: "Booked",
@@ -37,6 +41,18 @@ function fmtDate(d) {
     day: "numeric",
     month: "short",
     year: "numeric",
+  });
+}
+
+function fmtApptTime(iso) {
+  return new Date(iso).toLocaleString("en-GB", {
+    timeZone: "Europe/London",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
@@ -82,6 +98,15 @@ export default async function ReferralDetailPage({ params }) {
     ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
     : "Patient";
 
+  // Live appointment, if any. Dentists can read these for their own
+  // practice's referrals; staff can read all.
+  const { data: appt } = await supabase
+    .from("appointments")
+    .select("id, starts_at, status")
+    .eq("referral_id", id)
+    .eq("status", "booked")
+    .maybeSingle();
+
   // Only CBCT scans have a slice preview. OPG scans are JPEGs (their own image)
   // and show inline instead of going through the slice viewer.
   const isCbct =
@@ -124,6 +149,28 @@ export default async function ReferralDetailPage({ params }) {
             {STATUS_LABEL[ref.status] || ref.status}
           </span>
         </header>
+
+        {/* ---------- Appointment strip ---------- */}
+        {appt ? (
+          <div className="rd-appt">
+            <span className="rd-appt-icon" aria-hidden="true">&#128197;</span>
+            <span className="rd-appt-text">
+              Scan appointment: <b>{fmtApptTime(appt.starts_at)}</b>
+            </span>
+            {canUpload && (
+              <a className="rd-appt-link" href={"/referrals/" + id + "/book"}>
+                Manage booking
+              </a>
+            )}
+          </div>
+        ) : canUpload && (ref.status === "submitted" || ref.status === "booked") ? (
+          <div className="rd-appt none">
+            <span className="rd-appt-text">No appointment booked yet.</span>
+            <a className="rd-appt-link" href={"/referrals/" + id + "/book"}>
+              Book appointment
+            </a>
+          </div>
+        ) : null}
 
         <section className="rd-card">
           <h2 className="rd-h2">Referral</h2>
@@ -205,7 +252,7 @@ export default async function ReferralDetailPage({ params }) {
                   {isCbct && <ScanViewer scanId={s.id} />}
 
                   {!isCbct && imageUrls[s.id] && (
-                    <a
+                    
                       className="rd-opg-link"
                       href={imageUrls[s.id]}
                       target="_blank"
@@ -236,13 +283,23 @@ export default async function ReferralDetailPage({ params }) {
         .rd-back{display:inline-block;color:rgba(247,244,236,.6);text-decoration:none;
           font-size:14px;margin-bottom:24px;}
         .rd-back:hover{color:#e7ae3b;}
-        .rd-head{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap;}
+        .rd-head{display:flex;align-items:center;gap:16px;margin-bottom:18px;flex-wrap:wrap;}
         .rd-name{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:30px;margin:0;}
         .rd-badge{font-size:12px;letter-spacing:.08em;text-transform:uppercase;
           font-weight:600;padding:5px 12px;border-radius:999px;
           background:rgba(247,244,236,.12);color:rgba(247,244,236,.85);}
         .rd-badge.scanned,.rd-badge.delivered{background:rgba(231,174,59,.18);color:#e7ae3b;}
         .rd-badge.cancelled{background:rgba(255,120,120,.16);color:#ff9b9b;}
+        .rd-appt{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+          background:rgba(231,174,59,.12);border:1px solid rgba(231,174,59,.4);
+          border-radius:13px;padding:14px 18px;margin:0 0 22px;font-size:15px;}
+        .rd-appt.none{background:rgba(247,244,236,.05);border-color:rgba(247,244,236,.15);}
+        .rd-appt-icon{font-size:17px;}
+        .rd-appt-text b{color:#e7ae3b;}
+        .rd-appt-link{margin-left:auto;color:#e7ae3b;font-weight:600;font-size:14px;
+          text-decoration:none;border:1px solid rgba(231,174,59,.5);border-radius:999px;
+          padding:8px 16px;white-space:nowrap;}
+        .rd-appt-link:hover{background:rgba(231,174,59,.12);}
         .rd-card{background:rgba(247,244,236,.04);border:1px solid rgba(247,244,236,.08);
           border-radius:16px;padding:24px 26px;margin-bottom:22px;}
         .rd-h2{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:18px;
