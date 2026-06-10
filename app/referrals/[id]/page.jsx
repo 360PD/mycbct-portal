@@ -4,7 +4,7 @@ import { presignView } from "@/lib/backblaze";
 import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
 
-// v2 — shows the booked appointment date + booking links.
+// v2.1 — shows the booked appointment date + booking links.
 // Staff see Manage booking / Book appointment; dentists see the date
 // (read-only, via the practice-scoped RLS policy added 10 June).
 
@@ -251,7 +251,7 @@ export default async function ReferralDetailPage({ params }) {
 
                   {isCbct && <ScanViewer scanId={s.id} />}
 
-                  {!isCbct && imageUrls[s.id] && (
+                  {!isCbct && imageUrls[s.id] ? (
                     
                       className="rd-opg-link"
                       href={imageUrls[s.id]}
@@ -265,7 +265,7 @@ export default async function ReferralDetailPage({ params }) {
                         loading="lazy"
                       />
                     </a>
-                  )}
+                  ) : null}
                 </li>
               ))}
             </ul>
