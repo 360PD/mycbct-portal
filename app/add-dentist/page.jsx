@@ -51,6 +51,20 @@ async function addDentist(formData) {
     redirect("/add-dentist?error=" + encodeURIComponent("Server is missing its service key."));
   }
 
+  // Guard: refuse if this email already has an account, so we never collide
+  // with an existing profile (e.g. your own admin login).
+  const { data: existing } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
+  if (existing) {
+    redirect(
+      "/add-dentist?error=" +
+        encodeURIComponent("An account already exists for that email. Use a different address.")
+    );
+  }
+
   // Resolve the practice: a typed new name wins; otherwise use the chosen one.
   let resolvedPracticeId = practiceId;
   if (newPractice) {
