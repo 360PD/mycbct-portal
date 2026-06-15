@@ -5,7 +5,7 @@ import ReferralForm from "@/components/ReferralForm";
 // v3.1 — staff get the practice list for the picker (plain JS).
 // Staff/admin can always open the form (their profile has no practice;
 // they choose one per referral). Dentists work exactly as before.
-// Still hides the legacy "CBCT — historical" type from the picker.
+// Still hides any scan type whose name contains "historical".
 
 export default async function ReferPage() {
   const supabase = await createClient();
@@ -42,21 +42,24 @@ export default async function ReferPage() {
     practices = rows || [];
   }
 
-  const { data: scanTypes } = await supabase
+  const { data: scanTypeRows } = await supabase
     .from("scan_types")
     .select("id, code, name, description, base_price")
     .eq("active", true)
     .eq("is_addon", false)
     .neq("code", "ios")
-    .neq("code", "cbct_historical")
     .order("sort_order");
+
+  const scanTypes = (scanTypeRows || []).filter(
+    (st) => !st.name?.toLowerCase().includes("historical")
+  );
 
   return (
     <ReferralForm
       hasPractice={isStaff || !!profile?.practice_id}
       practiceName={practiceName}
       dentistName={profile?.full_name || profile?.email || ""}
-      scanTypes={scanTypes || []}
+      scanTypes={scanTypes}
       isStaff={isStaff}
       practices={practices}
     />
