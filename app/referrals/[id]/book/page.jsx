@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { sendAppointmentConfirmation } from "@/lib/emails/send-appointment-confirmation";
 
 // Booking page v3 — month-first picker fed by the scanning diary.
 // Opens on a month calendar: days with free slots are gold and clickable,
@@ -194,6 +195,35 @@ export default async function BookPage({ params, searchParams }) {
       .update({ status: "booked" })
       .eq("id", id)
       .eq("status", "submitted");
+
+    const { data: referralRow } = await supabase
+      .from("referrals")
+      .select(
+        "patient_id, referring_dentist_id, patients(email, first_name, last_name)"
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    const patient = one(referralRow?.patients);
+    let dentistName = null;
+    if (referralRow?.referring_dentist_id) {
+      const { data: dentist } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", referralRow.referring_dentist_id)
+        .maybeSingle();
+      dentistName = dentist?.full_name || null;
+    }
+
+    if (patient?.email) {
+      await sendAppointmentConfirmation({
+        to: patient.email,
+        startsAtISO: slotISO,
+        patientFirstName: patient.first_name,
+        patientLastName: patient.last_name,
+        dentistName,
+      });
+    }
 
     revalidatePath("/dashboard");
     redirect(`/referrals/${id}/book`);
