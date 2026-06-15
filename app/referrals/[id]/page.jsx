@@ -4,8 +4,9 @@ import { presignView } from "@/lib/backblaze";
 import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
 import ArchiveButton from "@/components/ArchiveButton";
+import ShareButton from "@/components/ShareButton";
 
-// v2.3 — archive feature added.
+// v2.3 — archive + share features added.
 
 const STATUS_LABEL = {
   submitted: "Submitted",
@@ -154,7 +155,6 @@ export default async function ReferralDetailPage({ params }) {
           </div>
         )}
 
-        {/* ---------- Appointment strip ---------- */}
         {appt ? (
           <div className="rd-appt">
             <span className="rd-appt-icon" aria-hidden="true">&#128197;</span>
@@ -264,9 +264,12 @@ export default async function ReferralDetailPage({ params }) {
           {canUpload ? <ScanUploader referralId={id} /> : null}
         </section>
 
+        <ShareButton referralId={id} />
+
         {canArchive && !ref.archived && (
           <ArchiveButton referralId={id} />
         )}
+
       </div>
 
       <style>{`
