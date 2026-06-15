@@ -1,11 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { presignView } from "@/lib/backblaze";
 
-function one(v: unknown) {
-  if (Array.isArray(v)) return v[0] || null;
-  return v || null;
-}
-
 function fmtDate(d: string | null) {
   if (!d) return "";
   return new Date(d).toLocaleDateString("en-GB", {
@@ -52,11 +47,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   const { data: ref } = await supabase
     .from("referrals")
-    .select(
-      "id, created_at, report_requested, " +
-      "patients(first_name, last_name, date_of_birth, sex), " +
-      "scan_types(name)"
-    )
+    .select("id, created_at, report_requested")
     .eq("id", shareToken.referral_id)
     .maybeSingle();
 
@@ -72,13 +63,23 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     );
   }
 
-  const patient = one(ref.patients) as { first_name: string; last_name: string; date_of_birth: string; sex: string } | null;
-  const scanType = one(ref.scan_types) as { name: string } | null;
-  const patientName = patient
-    ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
+  const { data: patientData } = await supabase
+    .from("patients")
+    .select("first_name, last_name, date_of_birth, sex")
+    .eq("id", (await supabase.from("referrals").select("patient_id").eq("id", ref.id).maybeSingle()).data?.patient_id)
+    .maybeSingle();
+
+  const { data: scanTypeData } = await supabase
+    .from("scan_types")
+    .select("name")
+    .eq("id", (await supabase.from("referrals").select("scan_type_id").eq("id", ref.id).maybeSingle()).data?.scan_type_id)
+    .maybeSingle();
+
+  const patientName = patientData
+    ? [patientData.first_name, patientData.last_name].filter(Boolean).join(" ")
     : "Patient";
 
-  const isCbct = !!scanType && /cbct/i.test(scanType.name || "");
+  const isCbct = !!scanTypeData && /cbct/i.test(scanTypeData.name || "");
 
   const { data: scans } = await supabase
     .from("scans")
@@ -119,15 +120,15 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           <dl className="sp-grid">
             <div>
               <dt>Scan type</dt>
-              <dd>{scanType ? scanType.name : "\u2014"}</dd>
+              <dd>{scanTypeData ? scanTypeData.name : "\u2014"}</dd>
             </div>
             <div>
               <dt>Date of birth</dt>
-              <dd>{patient?.date_of_birth ? fmtDate(patient.date_of_birth) : "\u2014"}</dd>
+              <dd>{patientData?.date_of_birth ? fmtDate(patientData.date_of_birth) : "\u2014"}</dd>
             </div>
             <div>
               <dt>Sex</dt>
-              <dd>{patient?.sex || "\u2014"}</dd>
+              <dd>{patientData?.sex || "\u2014"}</dd>
             </div>
             <div>
               <dt>Referred</dt>
