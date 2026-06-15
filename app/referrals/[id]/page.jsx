@@ -3,10 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { presignView } from "@/lib/backblaze";
 import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
+import ArchiveButton from "@/components/ArchiveButton";
 
-// v2.2 — shows the booked appointment date + booking links.
-// Staff see Manage booking / Book appointment; dentists see the date
-// (read-only, via the practice-scoped RLS policy added 10 June).
+// v2.3 — archive feature added.
 
 const STATUS_LABEL = {
   submitted: "Submitted",
@@ -25,7 +24,6 @@ const PREVIEW_LABEL = {
   failed: "Preview failed",
 };
 
-// Supabase returns a to-one embed as an object, but can hand back an array.
 function one(v) {
   if (Array.isArray(v)) return v[0] || null;
   return v || null;
@@ -79,17 +77,17 @@ export default async function ReferralDetailPage({ params }) {
     .maybeSingle();
   const role = profile?.role || "dentist";
   const canUpload = role === "staff" || role === "admin";
+  const canArchive = role === "staff" || role === "admin";
 
   const { data: ref } = await supabase
     .from("referrals")
     .select(
-      "id, status, created_at, pregnancy, clinical_notes, region_of_interest, report_requested, signature_name, " +
+      "id, status, created_at, pregnancy, clinical_notes, region_of_interest, report_requested, signature_name, archived, archive_reason, " +
         "patients(first_name,last_name,date_of_birth,sex), scan_types(name,code)"
     )
     .eq("id", id)
     .maybeSingle();
 
-  // No row = not found, or no access under RLS. Send them back.
   if (!ref) redirect("/dashboard");
 
   const patient = one(ref.patients);
@@ -98,8 +96,6 @@ export default async function ReferralDetailPage({ params }) {
     ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
     : "Patient";
 
-  // Live appointment, if any. Dentists can read these for their own
-  // practice's referrals; staff can read all.
   const { data: appt } = await supabase
     .from("appointments")
     .select("id, starts_at, status")
@@ -107,8 +103,6 @@ export default async function ReferralDetailPage({ params }) {
     .eq("status", "booked")
     .maybeSingle();
 
-  // Only CBCT scans have a slice preview. OPG scans are JPEGs (their own image)
-  // and show inline instead of going through the slice viewer.
   const isCbct =
     !!scanType &&
     /cbct/i.test((scanType.code || "") + " " + (scanType.name || ""));
@@ -121,8 +115,6 @@ export default async function ReferralDetailPage({ params }) {
 
   const scanList = scans || [];
 
-  // For OPG (non-CBCT) image scans, sign an inline URL so the page can show the
-  // image directly. CBCT scans are handled by the slice viewer, not here.
   const imageUrls = {};
   if (!isCbct) {
     await Promise.all(
@@ -131,7 +123,7 @@ export default async function ReferralDetailPage({ params }) {
           try {
             imageUrls[s.id] = await presignView(s.storage_key);
           } catch {
-            /* leave unset — falls back to the Download button */
+            /* leave unset */
           }
         }
       })
@@ -150,7 +142,17 @@ export default async function ReferralDetailPage({ params }) {
           <span className={"rd-badge " + ref.status}>
             {STATUS_LABEL[ref.status] || ref.status}
           </span>
+          {ref.archived && (
+            <span className="rd-badge archived">Archived</span>
+          )}
         </header>
+
+        {ref.archived && ref.archive_reason && (
+          <div className="rd-archived-notice">
+            <span>&#128193;</span>
+            <span>Archived — {ref.archive_reason}</span>
+          </div>
+        )}
 
         {/* ---------- Appointment strip ---------- */}
         {appt ? (
@@ -261,6 +263,10 @@ export default async function ReferralDetailPage({ params }) {
 
           {canUpload ? <ScanUploader referralId={id} /> : null}
         </section>
+
+        {canArchive && !ref.archived && (
+          <ArchiveButton referralId={id} />
+        )}
       </div>
 
       <style>{`
@@ -278,6 +284,11 @@ export default async function ReferralDetailPage({ params }) {
           background:rgba(247,244,236,.12);color:rgba(247,244,236,.85);}
         .rd-badge.scanned,.rd-badge.delivered{background:rgba(231,174,59,.18);color:#e7ae3b;}
         .rd-badge.cancelled{background:rgba(255,120,120,.16);color:#ff9b9b;}
+        .rd-badge.archived{background:rgba(255,120,120,.16);color:#ff9b9b;}
+        .rd-archived-notice{display:flex;align-items:center;gap:10px;
+          background:rgba(255,120,120,.1);border:1px solid rgba(255,120,120,.3);
+          border-radius:13px;padding:14px 18px;margin:0 0 22px;font-size:15px;
+          color:#ff9b9b;}
         .rd-appt{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
           background:rgba(231,174,59,.12);border:1px solid rgba(231,174,59,.4);
           border-radius:13px;padding:14px 18px;margin:0 0 22px;font-size:15px;}
