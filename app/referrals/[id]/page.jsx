@@ -5,8 +5,9 @@ import ScanUploader from "@/components/ScanUploader";
 import ScanViewer from "@/components/ScanViewer";
 import ArchiveButton from "@/components/ArchiveButton";
 import ShareButton from "@/components/ShareButton";
+import PatientContactEditor from "@/components/PatientContactEditor";
 
-// v2.3 — archive + share features added.
+// v2.4 — patient contact fields added.
 
 const STATUS_LABEL = {
   submitted: "Submitted",
@@ -84,7 +85,7 @@ export default async function ReferralDetailPage({ params }) {
     .from("referrals")
     .select(
       "id, status, created_at, pregnancy, clinical_notes, region_of_interest, report_requested, signature_name, archived, archive_reason, " +
-        "patients(first_name,last_name,date_of_birth,sex), scan_types(name,code)"
+        "patients(id, first_name, last_name, date_of_birth, sex, phone, alt_phone, email), scan_types(name,code)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -216,6 +217,15 @@ export default async function ReferralDetailPage({ params }) {
             </div>
           ) : null}
         </section>
+
+        {canUpload && patient ? (
+          <PatientContactEditor
+            patientId={patient.id}
+            phone={patient.phone || ""}
+            altPhone={patient.alt_phone || ""}
+            email={patient.email || ""}
+          />
+        ) : null}
 
         <section className="rd-card">
           <h2 className="rd-h2">Scans</h2>
