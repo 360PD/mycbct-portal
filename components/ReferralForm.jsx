@@ -74,6 +74,7 @@ export default function ReferralForm({
     clinicalNotes: "",
     reportChoice: "", // "self" | "arrange"
     signatureName: defaultSignature,
+    termsAccepted: false,
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -108,6 +109,7 @@ export default function ReferralForm({
     if (!f.clinicalNotes.trim()) e.clinicalNotes = 1;
     if (!f.reportChoice) e.reportChoice = 1;
     if (!f.signatureName.trim()) e.signatureName = 1;
+    if (!f.termsAccepted) e.termsAccepted = 1;
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -469,6 +471,21 @@ export default function ReferralForm({
                   placeholder="Dr A. Dentist"
                 />
               </div>
+              <div className={"rf-terms " + (errors.termsAccepted ? "err" : "")}>
+                <label className="rf-terms-label">
+                  <input
+                    type="checkbox"
+                    checked={f.termsAccepted}
+                    onChange={(e) => set("termsAccepted", e.target.checked)}
+                  />
+                  <span>
+                    I have read and agree to the{" "}
+                    <a href="/terms" target="_blank" rel="noopener noreferrer">
+                      Referral Terms &amp; Conditions
+                    </a>
+                  </span>
+                </label>
+              </div>
               <button
                 className="rf-submit"
                 type="button"
@@ -559,6 +576,20 @@ const styles = `
 .rf-fees-line + .rf-fees-line{margin-top:4px;}
 .rf-fees-total{margin-top:8px;padding-top:8px;border-top:1px solid rgba(176,125,18,.25);
   font-weight:700;font-size:14px;color:#9a7120;}
+
+.rf-terms{background:#0e1b2e;border-radius:11px;padding:14px 16px;margin:0 0 16px;
+  border:1px solid rgba(14,27,46,.2);}
+.rf-terms.err{outline:2px solid #f1c4bf;outline-offset:3px;}
+.rf-terms-label{display:flex;align-items:flex-start;gap:12px;color:#f7f4ec;
+  font-size:14px;line-height:1.55;cursor:pointer;}
+.rf-terms-label input{appearance:none;width:18px;height:18px;margin-top:2px;flex:none;cursor:pointer;
+  border:1px solid rgba(231,174,59,.55);border-radius:4px;background:rgba(247,244,236,.08);
+  position:relative;}
+.rf-terms-label input:checked{background:#e7ae3b;border-color:#e7ae3b;}
+.rf-terms-label input:checked::after{content:"";position:absolute;left:5px;top:2px;width:5px;height:9px;
+  border:solid #0e1b2e;border-width:0 2px 2px 0;transform:rotate(45deg);}
+.rf-terms-label a{color:#e7ae3b;font-weight:600;text-decoration:none;}
+.rf-terms-label a:hover{text-decoration:underline;}
 
 .rf-submit{width:100%;margin-top:6px;appearance:none;border:none;background:#e7ae3b;color:#0e1b2e;
   font:inherit;font-weight:600;font-size:16px;padding:15px;border-radius:999px;cursor:pointer;}
