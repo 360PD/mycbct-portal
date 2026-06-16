@@ -118,11 +118,11 @@ export default async function DiaryViewPage({ searchParams }) {
     supabase
       .from("appointments")
       .select(
-        "id, starts_at, referral_id, " +
+        "id, starts_at, status, referral_id, " +
           "referrals(id, clinical_notes, referring_dentist_id, " +
           "patients(first_name, last_name, date_of_birth), scan_types(name))"
       )
-      .eq("status", "booked")
+      .in("status", ["booked", "dna"])
       .gte("starts_at", rangeStart + "T00:00:00Z")
       .lte("starts_at", rangeEnd + "T23:59:59Z")
       .order("starts_at", { ascending: true }),
@@ -150,7 +150,9 @@ export default async function DiaryViewPage({ searchParams }) {
   const apptsByDay = {};
   for (const a of appts || []) {
     const day = londonDayOf(a.starts_at);
-    bookings[day] = (bookings[day] || 0) + 1;
+    if (a.status === "booked") {
+      bookings[day] = (bookings[day] || 0) + 1;
+    }
 
     const ref = one(a.referrals);
     const patient = one(ref?.patients);
@@ -163,6 +165,8 @@ export default async function DiaryViewPage({ searchParams }) {
       id: a.id,
       startsAt: a.starts_at,
       time: fmtTime(a.starts_at),
+      status: a.status,
+      isDna: a.status === "dna",
       referralId: ref?.id || a.referral_id,
       patientName,
       scanType: scanType?.name || "—",
@@ -204,11 +208,14 @@ export default async function DiaryViewPage({ searchParams }) {
             ) : (
               <ul className="dv-appts">
                 {dayAppts.map((appt) => (
-                  <li className="dv-appt-row" key={appt.id}>
+                  <li className={"dv-appt-row" + (appt.isDna ? " dna" : "")} key={appt.id}>
                     <a className="dv-appt-card" href={"/referrals/" + appt.referralId}>
                       <span className="dv-appt-time">{appt.time}</span>
                       <span className="dv-appt-main">
-                        <span className="dv-appt-name">{appt.patientName}</span>
+                        <span className="dv-appt-name">
+                          {appt.patientName}
+                          {appt.isDna ? <span className="dv-appt-dna">DNA</span> : null}
+                        </span>
                         <span className="dv-appt-meta">
                           {appt.scanType} &middot; {appt.dentistName}
                         </span>
@@ -218,7 +225,7 @@ export default async function DiaryViewPage({ searchParams }) {
                         <span>{appt.notesSnippet}</span>
                       </span>
                     </a>
-                    <DiaryDnaButton appointmentId={appt.id} />
+                    <DiaryDnaButton appointmentId={appt.id} isDna={appt.isDna} />
                   </li>
                 ))}
               </ul>
@@ -310,7 +317,11 @@ export default async function DiaryViewPage({ searchParams }) {
         .dv-appt-card:hover{border-color:rgba(231,174,59,.5);background:rgba(231,174,59,.08);}
         .dv-appt-time{flex:none;font-size:15px;font-weight:700;color:#e7ae3b;min-width:52px;}
         .dv-appt-main{display:flex;flex-direction:column;gap:3px;min-width:0;}
-        .dv-appt-name{font-size:15px;font-weight:600;}
+        .dv-appt-name{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+        .dv-appt-dna{font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+          font-weight:700;color:#ff9b9b;border:1px solid rgba(255,120,120,.5);
+          border-radius:999px;padding:2px 8px;}
+        .dv-appt-row.dna .dv-appt-card{opacity:.72;border-color:rgba(255,120,120,.25);}
         .dv-appt-meta{font-size:13px;color:rgba(247,244,236,.55);}
         .dv-appt-hover{display:none;position:absolute;left:18px;right:18px;bottom:calc(100% + 8px);
           background:#152438;border:1px solid rgba(231,174,59,.35);border-radius:10px;
@@ -321,7 +332,13 @@ export default async function DiaryViewPage({ searchParams }) {
           font:inherit;font-size:13px;font-weight:700;letter-spacing:.04em;
           color:#ff9b9b;background:transparent;border:1px solid rgba(255,120,120,.55);
           border-radius:8px;padding:10px 14px;transition:background .15s ease;}
-        .dv-dna:hover{background:rgba(255,120,120,.12);}
+        .dv-dna:hover:not(:disabled){background:rgba(255,120,120,.12);}
+        .dv-dna:disabled{opacity:.55;cursor:default;}
+        .dv-dna-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
+        .dv-dna-err{font-size:11px;color:#ff9b9b;max-width:120px;text-align:right;line-height:1.3;}
+        .dv-dna-badge{flex:none;align-self:center;font-size:11px;font-weight:700;
+          letter-spacing:.08em;text-transform:uppercase;color:#ff9b9b;
+          border:1px solid rgba(255,120,120,.55);border-radius:8px;padding:10px 14px;}
         @media(max-width:560px){
           .dv-months{grid-template-columns:1fr;}
           .dv-appt-row{flex-direction:column;}
