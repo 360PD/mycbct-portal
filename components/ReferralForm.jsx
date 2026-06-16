@@ -14,6 +14,7 @@ import { createReferral } from "@/app/refer/actions";
  *   practiceName : string|null
  *   dentistName  : string   — default for the signature (dentists only)
  *   scanTypes    : [{ id, code, name, description, base_price }]
+ *   reportFeePence : number — consultant report fee in pence (£120.00 = 12000)
  *   isStaff      : boolean  — staff/admin get the practice picker
  *   practices    : [{ id, name }] — staff only
  */
@@ -51,6 +52,7 @@ export default function ReferralForm({
   practiceName,
   dentistName = "",
   scanTypes = [],
+  reportFeePence = 12000,
   isStaff = false,
   practices = [],
 }) {
@@ -85,6 +87,12 @@ export default function ReferralForm({
 
   const chosenScan = scanTypes.find((s) => s.id === f.scanTypeId) || null;
   const reportAvailable = !!chosenScan && chosenScan.code !== "ios";
+  const reportRequested = f.reportChoice === "arrange";
+  const scanFeePence = chosenScan?.base_price ?? null;
+  const totalFeePence =
+    typeof scanFeePence === "number"
+      ? scanFeePence + (reportRequested ? reportFeePence : 0)
+      : null;
 
   function validate() {
     const e = {};
@@ -423,6 +431,25 @@ export default function ReferralForm({
                   </button>
                 </div>
               </div>
+
+              {chosenScan && typeof scanFeePence === "number" && (
+                <div className="rf-fees" aria-live="polite">
+                  <p className="rf-fees-line">
+                    <span>Scan fee</span>
+                    <span>{money(scanFeePence)}</span>
+                  </p>
+                  {reportRequested && (
+                    <p className="rf-fees-line">
+                      <span>Radiologist report</span>
+                      <span>{money(reportFeePence)}</span>
+                    </p>
+                  )}
+                  <p className="rf-fees-total">
+                    <span>Total</span>
+                    <span>{money(totalFeePence)}</span>
+                  </p>
+                </div>
+              )}
             </section>
 
             {/* Confirm */}
@@ -524,6 +551,14 @@ const styles = `
 .rf-choice .t{font-weight:600;font-size:15px;}
 .rf-choice .d{font-size:12.5px;color:rgba(14,27,46,.6);line-height:1.35;}
 .rf-choice .p{margin-top:4px;font-weight:600;color:#b07d12;font-size:14px;}
+
+.rf-fees{margin-top:16px;padding:12px 14px;border-radius:11px;
+  background:rgba(231,174,59,.1);border:1px solid rgba(231,174,59,.28);}
+.rf-fees-line,.rf-fees-total{display:flex;justify-content:space-between;gap:16px;
+  margin:0;font-size:13px;line-height:1.5;color:#b07d12;}
+.rf-fees-line + .rf-fees-line{margin-top:4px;}
+.rf-fees-total{margin-top:8px;padding-top:8px;border-top:1px solid rgba(176,125,18,.25);
+  font-weight:700;font-size:14px;color:#9a7120;}
 
 .rf-submit{width:100%;margin-top:6px;appearance:none;border:none;background:#e7ae3b;color:#0e1b2e;
   font:inherit;font-weight:600;font-size:16px;padding:15px;border-radius:999px;cursor:pointer;}

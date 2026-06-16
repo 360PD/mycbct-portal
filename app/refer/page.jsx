@@ -7,6 +7,8 @@ import ReferralForm from "@/components/ReferralForm";
 // they choose one per referral). Dentists work exactly as before.
 // Still hides any scan type whose name contains "historical".
 
+const REPORT_FEE_PENCE = 12000;
+
 export default async function ReferPage() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
@@ -60,6 +62,7 @@ export default async function ReferPage() {
       practiceName={practiceName}
       dentistName={profile?.full_name || profile?.email || ""}
       scanTypes={scanTypes}
+      reportFeePence={REPORT_FEE_PENCE}
       isStaff={isStaff}
       practices={practices}
     />

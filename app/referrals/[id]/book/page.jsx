@@ -219,6 +219,7 @@ export default async function BookPage({ params, searchParams }) {
       await sendAppointmentConfirmation({
         to: patient.email,
         startsAtISO: slotISO,
+        referralId: id,
         patientFirstName: patient.first_name,
         patientLastName: patient.last_name,
         dentistName,
