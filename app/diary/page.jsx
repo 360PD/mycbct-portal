@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import DiaryCalendar from "@/components/DiaryCalendar";
 
-// Diary page v2 — staff/admin only. Instant clicks, no page flash.
+// Diary page v2 — admin only. Instant clicks, no page flash.
 // Loads six months of availability + booking counts, then hands the
 // calendar to a client component. Saves happen through the saveDay
 // server action below.
@@ -49,7 +49,7 @@ function dayState(rows) {
   return "custom";
 }
 
-async function requireStaff(supabase) {
+async function requireAdmin(supabase) {
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
   if (!claims) return null;
@@ -58,15 +58,14 @@ async function requireStaff(supabase) {
     .select("role")
     .eq("id", claims.sub)
     .single();
-  const role = me?.role;
-  if (role !== "staff" && role !== "admin") return null;
+  if (me?.role !== "admin") return null;
   return claims.sub;
 }
 
 export default async function DiaryPage() {
   const supabase = await createClient();
-  const staffId = await requireStaff(supabase);
-  if (!staffId) redirect("/dashboard");
+  const adminId = await requireAdmin(supabase);
+  if (!adminId) redirect("/dashboard");
 
   const today = londonToday();
   const [tYear, tMonth] = [Number(today.slice(0, 4)), Number(today.slice(5, 7))];
@@ -116,8 +115,8 @@ export default async function DiaryPage() {
   async function saveDay(day, state) {
     "use server";
     const supabase = await createClient();
-    const staffId = await requireStaff(supabase);
-    if (!staffId) return { error: "Not signed in as staff" };
+    const adminId = await requireAdmin(supabase);
+    if (!adminId) return { error: "Not signed in as admin" };
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) return { error: "Bad date" };
     if (isWeekend(day)) return { error: "Weekends stay closed" };
@@ -133,7 +132,7 @@ export default async function DiaryPage() {
         day,
         start_time: p.start,
         end_time: p.end,
-        created_by: staffId,
+        created_by: adminId,
       });
       if (insErr) return { error: insErr.message };
     }
