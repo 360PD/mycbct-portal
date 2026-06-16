@@ -145,7 +145,7 @@ export default async function DiaryPage() {
       <div className="dy-inner">
         <a className="dy-back" href="/dashboard">&larr; Back to dashboard</a>
 
-        <h1 className="dy-h1">Scanning diary</h1>
+        <h1 className="dy-h1">Scanning schedule</h1>
         <p className="dy-sub">
           Click a day to change it: Closed &rarr; AM (9&ndash;1) &rarr; PM (1&ndash;5) &rarr; Full day (9&ndash;5) &rarr; Closed.
           Days are closed unless you open them. Closing a day does not cancel bookings already on it.

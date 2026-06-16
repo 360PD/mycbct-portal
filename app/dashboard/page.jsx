@@ -319,7 +319,7 @@ export default async function DashboardPage({ searchParams }) {
             <div className="db-head">
               <h2>Action queue</h2>
               <div className="db-actions">
-                <a className="db-new ghost" href="/diary">Diary</a>
+                <a className="db-new ghost" href="/diary">Schedule</a>
                 <a className="db-new ghost" href="/practices">Practices</a>
                 <a className="db-new ghost" href="/add-dentist">Add a dentist</a>
                 <a className="db-new" href="/refer">New referral</a>
