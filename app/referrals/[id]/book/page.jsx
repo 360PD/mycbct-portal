@@ -447,7 +447,7 @@ export default async function BookPage({ params, searchParams }) {
             {!dayOpen ? (
               <p className="bk-closed">
                 The scanning centre isn&rsquo;t open this day. Go back to the calendar,
-                or open it in the <a href="/diary">Scanning diary</a> first.
+                or open it in the <a href="/diary">Scanning schedule</a> first.
               </p>
             ) : (
               <div className="bk-grid">
