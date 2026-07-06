@@ -6,3 +6,7 @@ node_modules
 # build output & macOS files
 .next/
 .DS_Store
+
+# build output & macOS files
+.next/
+.DS_Store
