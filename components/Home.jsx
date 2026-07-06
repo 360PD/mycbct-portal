@@ -303,6 +303,50 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
 
   /* respect users who prefer reduced motion */
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+
+  /* ── cross-sell sections ── */
+  .xs-eyebrow { display:inline-flex; align-items:center; gap:8px; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--gold-deep); font-weight:700; }
+  .xs-eyebrow.light { color:var(--gold); }
+  .xs-h2 { font-family:'Fraunces',serif; font-size:32px; font-weight:500; letter-spacing:-.5px; line-height:1.14; margin:14px 0; color:var(--ink); }
+  .xs-h2.light { color:#fff; }
+  .xs-body { font-size:15.5px; line-height:1.7; color:var(--muted); max-width:540px; }
+  .xs-body.light { color:rgba(255,255,255,.72); }
+  @media (max-width:560px){ .xs-h2{ font-size:26px; } }
+
+  .xs-courses { background:var(--card); border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:76px 24px; }
+  .xs-courses-in { max-width:1120px; margin:0 auto; display:grid; grid-template-columns:1.1fr .9fr; gap:48px; align-items:center; }
+  @media (max-width:820px){ .xs-courses-in{ grid-template-columns:1fr; gap:30px; } }
+  .xs-course-card { background:var(--paper); border:1px solid var(--line); border-radius:18px; padding:26px 28px; }
+  .xs-course-card h4 { font-family:'Fraunces',serif; font-size:18px; font-weight:600; color:var(--ink); margin-bottom:16px; }
+  .xs-clist { list-style:none; display:flex; flex-direction:column; gap:13px; }
+  .xs-clist li { display:flex; gap:11px; align-items:flex-start; font-size:14.5px; color:var(--muted); line-height:1.5; }
+  .xs-clist .tk { width:20px; height:20px; min-width:20px; margin-top:1px; border-radius:99px; background:var(--gold); color:var(--ink); display:grid; place-items:center; }
+
+  .xs-kit { background:var(--paper); border-top:1px solid var(--line); padding:76px 24px; }
+  .xs-kit-in { max-width:1120px; margin:0 auto; }
+  .xs-kit-head { text-align:center; margin-bottom:40px; }
+  .xs-kit-head .xs-body { margin:12px auto 0; }
+  .xs-kit-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  @media (max-width:820px){ .xs-kit-grid{ grid-template-columns:1fr; } }
+  .xs-card { display:flex; flex-direction:column; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:26px; text-decoration:none; transition:transform .18s, box-shadow .18s, border-color .18s; }
+  .xs-card:hover { transform:translateY(-4px); box-shadow:0 16px 40px rgba(14,27,46,.09); border-color:var(--gold); }
+  .xs-card .ic { width:44px; height:44px; border-radius:11px; background:var(--ink); color:var(--gold); display:grid; place-items:center; margin-bottom:16px; }
+  .xs-card h3 { font-family:'Fraunces',serif; font-size:20px; font-weight:600; color:var(--ink); margin-bottom:8px; }
+  .xs-card p { font-size:14px; color:var(--muted); line-height:1.6; flex:1; }
+  .xs-more { margin-top:16px; font-size:14px; font-weight:700; color:var(--gold-deep); display:inline-flex; align-items:center; gap:6px; }
+  .xs-card:hover .xs-more { gap:10px; }
+
+  .xs-implants { background:var(--ink); padding:76px 24px; }
+  .xs-implants-in { max-width:1120px; margin:0 auto; }
+  .xs-implants-head { margin-bottom:34px; }
+  .xs-implants-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:760px){ .xs-implants-grid{ grid-template-columns:1fr; } }
+  .xs-imp { display:flex; flex-direction:column; background:var(--navy); border:1px solid rgba(255,255,255,.1); border-radius:18px; padding:30px; text-decoration:none; transition:transform .18s, border-color .18s; }
+  .xs-imp:hover { transform:translateY(-4px); border-color:var(--gold); }
+  .xs-imp .tag { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--gold); margin-bottom:12px; }
+  .xs-imp h3 { font-family:'Fraunces',serif; font-size:22px; font-weight:600; color:#fff; margin-bottom:8px; }
+  .xs-imp p { font-size:14.5px; color:rgba(255,255,255,.7); line-height:1.6; flex:1; }
+  .xs-imp .xs-more { color:var(--gold); }
   `;
 
   const Tooth = () => (
@@ -379,9 +423,9 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
       {/* DEMO VIEWER */}
       <section className="hm-demo" id="why">
         <div className="hm-wrap">
-          <div className="hm-eyebrow">See it in action</div>
-          <h2 className="hm-sech2">Take the viewer for a spin</h2>
-          <p className="hm-secsub">The same quick-look viewer your dentists get. Drag across the scan to move through the slices, switch planes, or press play. (Real CBCT data from a manufacturer demo scan — no patient involved.)</p>
+          <div className="hm-eyebrow">Online Quick View</div>
+          <h2 className="hm-sech2">Quick View — any scan, any device.</h2>
+          <p className="hm-secsub">Every scan you refer opens in your online portal. Check it in seconds with Quick View — on any device, from an iPhone to a MacBook — then download the full high-resolution scan to diagnose and plan the case in our free implant planning software. (The scan below is a manufacturer demo — drag across it, switch planes, or press play.)</p>
           <div className="hm-demowrap"><DemoViewer /></div>
         </div>
       </section>
@@ -414,6 +458,85 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
             <li><span className="hm-rtick"><Tick /></span> Typical turnaround within 48 hours</li>
             <li><span className="hm-rtick"><Tick /></span> Priced per scan, no surprises</li>
           </ul>
+        </div>
+      </section>
+
+      {/* CROSS-SELL: REPORTING COURSES */}
+      <section className="xs-courses">
+        <div className="xs-courses-in">
+          <div>
+            <span className="xs-eyebrow">● CPD-accredited training</span>
+            <h2 className="xs-h2">Own a CBCT? Learn to report your own scans.</h2>
+            <p className="xs-body">Every CBCT scan has to be reported to GDC standards. On our CPD-accredited courses you'll learn to read and report your own — led by consultant radiologist Dr Ed Walker at our Yorkshire training hub. Small groups, real datasets, hands-on.</p>
+            <div style={{ marginTop: 26 }}>
+              <a className="hm-btn gold lg" href="https://360v.co.uk/reporting/" target="_blank" rel="noopener">See courses &amp; dates <Arrow /></a>
+            </div>
+          </div>
+          <div className="xs-course-card">
+            <h4>What you'll cover</h4>
+            <ul className="xs-clist">
+              <li><span className="tk"><Tick /></span>Justification, anatomy and acquisition</li>
+              <li><span className="tk"><Tick /></span>Interpreting the dataset with confidence</li>
+              <li><span className="tk"><Tick /></span>Writing a clear, structured report</li>
+              <li><span className="tk"><Tick /></span>Verifiable CPD · GDC outcomes C &amp; D</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* CROSS-SELL: IMAGING EQUIPMENT */}
+      <section className="xs-kit">
+        <div className="xs-kit-in">
+          <div className="xs-kit-head">
+            <span className="xs-eyebrow">● Equip your practice</span>
+            <h2 className="xs-h2" style={{ textAlign: "center" }}>Ready to bring imaging in-house?</h2>
+            <p className="xs-body">We supply, install and support the imaging chain across the UK — and help you choose the right kit for what you actually scan for.</p>
+          </div>
+          <div className="xs-kit-grid">
+            <a className="xs-card" href="https://360v.co.uk/which_cbct/" target="_blank" rel="noopener">
+              <div className="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /><path d="M12 12v9M4 7.5l8 4.5 8-4.5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /></svg></div>
+              <h3>CBCT scanners</h3>
+              <p>Compact 3D imaging for implants, endo and pathology. We help you choose, install and train — price-matched on the major brands.</p>
+              <span className="xs-more">Compare CBCT <Arrow /></span>
+            </a>
+            <a className="xs-card" href="https://360v.co.uk/intraoral-scanners/" target="_blank" rel="noopener">
+              <div className="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" /><path d="M7 12c2-2 3 2 5 0s3-2 5 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></div>
+              <h3>Intraoral scanners</h3>
+              <p>Digital impressions without the subscription fees — the Eighteeth Helios 700 and iTero Element.</p>
+              <span className="xs-more">Explore scanners <Arrow /></span>
+            </a>
+            <a className="xs-card" href="https://360v.co.uk/intra-oral-xray/" target="_blank" rel="noopener">
+              <div className="ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></div>
+              <h3>Intraoral X-ray</h3>
+              <p>Sensors, phosphor plates and generators — supplied, fitted and supported, including the ultra-thin Eighteeth NanoPix.</p>
+              <span className="xs-more">Explore IO X-ray <Arrow /></span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* CROSS-SELL: IMPLANTS (360 Dental) */}
+      <section className="xs-implants">
+        <div className="xs-implants-in">
+          <div className="xs-implants-head">
+            <span className="xs-eyebrow light">● Sister company · 360 Dental</span>
+            <h2 className="xs-h2 light">Placing implants? Meet OXY.</h2>
+            <p className="xs-body light">360 Dental supplies OXY implant systems — from everyday single-tooth cases to full-arch rehabilitation.</p>
+          </div>
+          <div className="xs-implants-grid">
+            <a className="xs-imp" href="https://360oxy.co.uk/fixo/" target="_blank" rel="noopener">
+              <span className="tag">Full-arch</span>
+              <h3>Fixo</h3>
+              <p>Our full-mouth system for fixed full-arch rehabilitation — the workflow taught at the 360 Implant Academy.</p>
+              <span className="xs-more">Explore Fixo <Arrow /></span>
+            </a>
+            <a className="xs-imp" href="https://360oxy.co.uk/compare/" target="_blank" rel="noopener">
+              <span className="tag">Single implants</span>
+              <h3>PSK</h3>
+              <p>Straightforward single-tooth implants at a price that makes everyday cases add up. Compare the range.</p>
+              <span className="xs-more">Compare PSK <Arrow /></span>
+            </a>
+          </div>
         </div>
       </section>
 
