@@ -466,8 +466,8 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
         <div className="xs-courses-in">
           <div>
             <span className="xs-eyebrow">● CPD-accredited training</span>
-            <h2 className="xs-h2">Own a CBCT? Learn to report your own scans.</h2>
-            <p className="xs-body">Every CBCT scan has to be reported to GDC standards. On our CPD-accredited courses you'll learn to read and report your own — led by consultant radiologist Dr Ed Walker at our Yorkshire training hub. Small groups, real datasets, hands-on.</p>
+            <h2 className="xs-h2">Refer for CBCT? You still have to report it.</h2>
+            <p className="xs-body">Under IR(ME)R, every CBCT scan must be clinically evaluated and reported by someone competent — and referring the scan out doesn't remove that duty. So you either pay for a radiologist report every time, or learn to report your own. Our CPD-accredited courses get you there: led by consultant radiologist Dr Ed Walker at our Yorkshire training hub, with small groups, real datasets and hands-on practice.</p>
             <div style={{ marginTop: 26 }}>
               <a className="hm-btn gold lg" href="https://360v.co.uk/reporting/" target="_blank" rel="noopener">See courses &amp; dates <Arrow /></a>
             </div>
