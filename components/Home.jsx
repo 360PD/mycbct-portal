@@ -30,116 +30,88 @@ function HmLockup({ className = "" }) {
   );
 }
 
+/* Real CBCT demo scan (manufacturer demo — no patient). Frames are baked into
+ * sprite sheets under /public/scan and scrubbed here: axial, coronal, sagittal. */
+const SCAN_PLANES = [
+  { k: "axial",    label: "Axial",    src: "/scan/axial.jpg",    count: 80, cols: 8, rows: 10, frame: 340 },
+  { k: "coronal",  label: "Coronal",  src: "/scan/coronal.jpg",  count: 64, cols: 8, rows: 8,  frame: 340 },
+  { k: "sagittal", label: "Sagittal", src: "/scan/sagittal.jpg", count: 64, cols: 8, rows: 8,  frame: 340 },
+];
+
 function DemoViewer() {
-  const PLANES = [
-    { k: "axial", label: "Axial", total: 72 },
-    { k: "coronal", label: "Coronal", total: 56 },
-    { k: "sagittal", label: "Sagittal", total: 56 },
-  ];
   const [plane, setPlane] = useState("axial");
-  const [idx, setIdx] = useState(36);
+  const [idx, setIdx] = useState(40);
   const [playing, setPlaying] = useState(true);
+  const [ready, setReady] = useState(false);
   const cv = useRef(null);
   const drag = useRef(null);
-  const total = PLANES.find((p) => p.k === plane).total;
+  const imgs = useRef({});
+  const cfg = SCAN_PLANES.find((p) => p.k === plane);
+  const total = cfg.count;
+
+  /* preload the three sprite sheets once */
+  useEffect(() => {
+    let live = true, loaded = 0;
+    SCAN_PLANES.forEach((p) => {
+      const im = new Image();
+      im.onload = () => { if (live && ++loaded === SCAN_PLANES.length) setReady(true); };
+      im.src = p.src;
+      imgs.current[p.k] = im;
+    });
+    return () => { live = false; };
+  }, []);
 
   const switchPlane = (nk) => {
     const frac = idx / (total - 1);
-    const nt = PLANES.find((p) => p.k === nk).total;
+    const nt = SCAN_PLANES.find((p) => p.k === nk).count;
     setPlane(nk); setIdx(Math.round(frac * (nt - 1)));
   };
 
+  /* auto-play cine */
   useEffect(() => {
     if (!playing) return;
-    const t = setInterval(() => setIdx((i) => (i + 1) % total), 95);
+    const t = setInterval(() => setIdx((i) => (i + 1) % total), 90);
     return () => clearInterval(t);
   }, [playing, total]);
 
+  /* start paused for reduced-motion visitors */
   useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPlaying(false);
+    if (typeof window !== "undefined" && window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPlaying(false);
   }, []);
 
+  /* draw the current frame out of its sprite sheet */
   useEffect(() => {
     const c = cv.current; if (!c) return;
     const ctx = c.getContext("2d");
-    const W = c.width, H = c.height, cx = W / 2, cy = H / 2 + H * 0.02;
-    const t = total > 1 ? idx / (total - 1) : 0;
-    let s = (idx * 2654435761 + plane.length * 40503) | 0;
-    const r = () => { s = (s + 0x6D2B79F5) | 0; let x = Math.imul(s ^ (s >>> 15), 1 | s); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
-    const ell = (x, y, rx, ry, fill) => { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); };
-
+    const W = c.width, H = c.height;
     ctx.fillStyle = "#04060a"; ctx.fillRect(0, 0, W, H);
-    const vg = ctx.createRadialGradient(cx, cy, 12, cx, cy, Math.max(W, H) * 0.5);
-    vg.addColorStop(0, "rgba(74,80,90,0.5)"); vg.addColorStop(0.7, "rgba(34,38,46,0.35)"); vg.addColorStop(1, "rgba(4,6,10,0)");
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-
-    if (plane === "axial") {
-      ell(cx, cy, W * 0.40, H * 0.345, "#14171d");
-      ell(cx, cy, W * 0.375, H * 0.315, "#202632");
-      const archW = W * 0.20 * (0.85 + 0.3 * Math.sin(t * Math.PI));
-      const archH = H * 0.19, ay = cy + H * 0.045;
-      ctx.lineWidth = 17; ctx.strokeStyle = "#727983";
-      ctx.beginPath(); ctx.ellipse(cx, ay, archW + 12, archH, 0, Math.PI * 0.12, Math.PI * 0.88); ctx.stroke();
-      ctx.lineWidth = 9; ctx.strokeStyle = "#3b414b";
-      ctx.beginPath(); ctx.ellipse(cx, ay, archW + 12, archH, 0, Math.PI * 0.12, Math.PI * 0.88); ctx.stroke();
-      const n = 12;
-      for (let i = 0; i <= n; i++) {
-        const a = Math.PI * 0.14 + Math.PI * 0.72 * (i / n);
-        const tx = cx + Math.cos(a) * (archW + 12), ty = ay + Math.sin(a) * archH;
-        const b = 208 + Math.floor(r() * 42);
-        ell(tx, ty, 5.4, 6.4, `rgb(${b},${b},${b - 5})`);
-        ell(tx, ty, 2.4, 2.9, "#9aa0a8");
-      }
-      ell(cx, cy - H * 0.01, W * 0.065, H * 0.06, "#0a0c10");
-      ell(cx, cy + H * 0.235, W * 0.045, H * 0.035, "#5b616a");
-    } else if (plane === "coronal") {
-      ell(cx, cy, W * 0.31, H * 0.37, "#1a1f28");
-      ell(cx - W * 0.13, cy - H * 0.02, W * 0.05, H * 0.30, "#565c64");
-      ell(cx + W * 0.13, cy - H * 0.02, W * 0.05, H * 0.30, "#565c64");
-      const teeth = 9;
-      for (let i = 0; i <= teeth; i++) {
-        const tx = cx - W * 0.16 + W * 0.32 * (i / teeth), ty = cy + H * 0.17 + Math.sin(i + t * 6) * 4;
-        const b = 205 + Math.floor(r() * 40);
-        ell(tx, ty, 5.5, 7.5, `rgb(${b},${b},${b - 5})`);
-      }
-      ell(cx, cy - H * 0.05, W * 0.035, H * 0.10, "#0a0c10");
-    } else {
-      ell(cx + W * 0.02, cy, W * 0.31, H * 0.35, "#1a1f28");
-      for (let i = 0; i < 7; i++) ell(cx + W * 0.20, cy - H * 0.22 + i * H * 0.075, W * 0.05, H * 0.027, "#5b616a");
-      const teeth = 7;
-      for (let i = 0; i <= teeth; i++) {
-        const tx = cx - W * 0.16 + W * 0.22 * (i / teeth), ty = cy + H * 0.155;
-        const b = 202 + Math.floor(r() * 44);
-        ell(tx, ty, 5.5, 6.5, `rgb(${b},${b},${b - 5})`);
-      }
-      ell(cx - W * 0.04, cy - H * 0.05, W * 0.055, H * 0.055, "#0a0c10");
-    }
-
-    const dots = (W * H) / 240;
-    for (let i = 0; i < dots; i++) { const x = r() * W, y = r() * H, a = r() * 0.10; ctx.fillStyle = r() > 0.5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`; ctx.fillRect(x, y, 1.4, 1.4); }
-    const eg = ctx.createRadialGradient(cx, cy, H * 0.3, cx, cy, Math.max(W, H) * 0.6);
-    eg.addColorStop(0, "rgba(0,0,0,0)"); eg.addColorStop(1, "rgba(0,0,0,0.62)");
-    ctx.fillStyle = eg; ctx.fillRect(0, 0, W, H);
-  }, [plane, idx, total]);
+    const im = imgs.current[plane];
+    if (!im || !im.complete || !im.naturalWidth) return;
+    const f = cfg.frame;
+    const col = idx % cfg.cols, row = Math.floor(idx / cfg.cols);
+    const s = Math.min(W, H) / f;
+    const dw = f * s, dh = f * s;
+    ctx.drawImage(im, col * f, row * f, f, f, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }, [plane, idx, ready, cfg.frame, cfg.cols]);
 
   const onDown = (e) => { setPlaying(false); drag.current = { x: e.clientX, idx }; e.currentTarget.setPointerCapture(e.pointerId); };
-  const onMove = (e) => { if (!drag.current) return; const ni = drag.current.idx + Math.round((e.clientX - drag.current.x) / 6); setIdx(Math.max(0, Math.min(total - 1, ni))); };
+  const onMove = (e) => { if (!drag.current) return; const ni = drag.current.idx + Math.round((e.clientX - drag.current.x) / 5); setIdx(Math.max(0, Math.min(total - 1, ni))); };
   const onUp = () => { drag.current = null; };
 
   return (
     <div className="hm-dvcard">
       <div className="hm-dvstage">
-        <canvas ref={cv} width={640} height={440} className="hm-dvcanvas"
-          role="img" aria-label="Interactive demo CBCT scan — drag to move through the slices"
+        <canvas ref={cv} width={560} height={560} className="hm-dvcanvas"
+          role="img" aria-label="CBCT demo scan — drag to move through the slices"
           style={{ touchAction: "none", cursor: "ew-resize" }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} />
-        <span className="hm-dvbanner">Demo scan · preview only</span>
+        <span className="hm-dvbanner">Real CBCT \u00b7 demo scan</span>
         <span className="hm-dvslice">Slice {idx + 1} / {total}</span>
       </div>
       <div className="hm-dvctrls">
         <div className="hm-dvtabs">
-          {PLANES.map((p) => <button key={p.k} className={"hm-dvtab " + (plane === p.k ? "on" : "")} onClick={() => switchPlane(p.k)}>{p.label}</button>)}
+          {SCAN_PLANES.map((p) => <button key={p.k} className={"hm-dvtab " + (plane === p.k ? "on" : "")} onClick={() => switchPlane(p.k)}>{p.label}</button>)}
         </div>
         <button className="hm-dvplay" onClick={() => setPlaying((p) => !p)}>
           {playing
@@ -150,7 +122,7 @@ function DemoViewer() {
       <input type="range" className="hm-dvscrub" min={0} max={total - 1} value={idx}
         style={{ "--pct": (idx / (total - 1)) * 100 + "%" }}
         onChange={(e) => { setPlaying(false); setIdx(Number(e.target.value)); }} />
-      <div className="hm-dvhint">Drag across the scan or use the slider · switch planes above</div>
+      <div className="hm-dvhint">Drag across the scan or use the slider \u00b7 switch planes above</div>
     </div>
   );
 }
@@ -211,6 +183,8 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
   .hm-herogrid { display:grid; grid-template-columns:1.1fr .9fr; gap:54px; align-items:center; }
   @media (max-width:900px){ .hm-herogrid{ grid-template-columns:1fr; gap:40px; } }
   .hm-kicker { display:inline-flex; align-items:center; gap:9px; font-size:13px; letter-spacing:.04em; color:var(--gold); background:rgba(231,174,59,.12); border:1px solid rgba(231,174,59,.3); padding:7px 14px; border-radius:99px; font-weight:600; }
+  .hm-addr { display:flex; flex-direction:column; align-items:flex-start; gap:9px; }
+  .hm-addrline { font-size:14.5px; font-weight:500; color:rgba(255,255,255,.82); letter-spacing:.01em; }
   .hm-h1 { font-family:'Fraunces',serif; font-weight:500; font-size:54px; line-height:1.04; letter-spacing:-1.2px; margin:22px 0 18px; }
   .hm-h1 em { font-style:normal; color:var(--gold); }
   @media (max-width:560px){ .hm-h1{ font-size:38px; } }
@@ -368,7 +342,10 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
       <header className="hm-hero">
         <div className="hm-wrap hm-herogrid">
           <div>
-            <span className="hm-kicker">● Yorkshire CBCT scanning centre</span>
+            <div className="hm-addr">
+              <span className="hm-kicker">● Our new scanning centre address</span>
+              <div className="hm-addrline">360 Visualise · Bradford Road · Sandbeds · BD20 5LY</div>
+            </div>
             <h1 className="hm-h1">Specialist CBCT scanning, <em>simple</em> for your practice.</h1>
             <p className="hm-lede">Refer online, we scan your patient, and you get the images back fast — with an optional consultant report. Built around how your practice actually works.</p>
             <div className="hm-heroctas">
@@ -390,7 +367,7 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
               <div className="hm-scan"><HeroMachine /><span className="hm-scanlbl">CBCT scanner · live 3D</span></div>
               <div className="hm-prow">
                 <span className="hm-pico">{ic.report}</span>
-                <div><div className="hm-pt">Consultant report</div><div className="hm-pd">Mrs J. Carter · single jaw</div></div>
+                <div><div className="hm-pt">Consultant report</div><div className="hm-pd">Single jaw</div></div>
                 <span className="hm-ppill">Ready</span>
               </div>
             </div>
@@ -399,22 +376,12 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
         </div>
       </header>
 
-      {/* VALUE PROPS */}
-      <section className="hm-props" id="why">
-        <div className="hm-wrap hm-props-grid">
-          <div className="hm-prop"><div className="ic">{ic.bolt}</div><h3>Fast turnaround</h3><p>Images ready as soon as your patient's scanned, with reports back in days, not weeks.</p></div>
-          <div className="hm-prop"><div className="ic">{ic.report}</div><h3>Specialist reports</h3><p>Optional consultant reporting with annotated key images — clear, clinical, and easy to act on.</p></div>
-          <div className="hm-prop"><div className="ic">{ic.lock}</div><h3>Secure UK storage</h3><p>Every scan stored safely in the UK and ready to download whenever you need it.</p></div>
-          <div className="hm-prop"><div className="ic">{ic.cal}</div><h3>Effortless booking</h3><p>Book the patient at referral, or let them choose and pay for their own slot online.</p></div>
-        </div>
-      </section>
-
       {/* DEMO VIEWER */}
-      <section className="hm-demo">
+      <section className="hm-demo" id="why">
         <div className="hm-wrap">
           <div className="hm-eyebrow">See it in action</div>
           <h2 className="hm-sech2">Take the viewer for a spin</h2>
-          <p className="hm-secsub">The same quick-look viewer your dentists get. Drag across the scan to move through the slices, switch planes, or press play. (A demo scan — not a real patient.)</p>
+          <p className="hm-secsub">The same quick-look viewer your dentists get. Drag across the scan to move through the slices, switch planes, or press play. (Real CBCT data from a manufacturer demo scan — no patient involved.)</p>
           <div className="hm-demowrap"><DemoViewer /></div>
         </div>
       </section>
