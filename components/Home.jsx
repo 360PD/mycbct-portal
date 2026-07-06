@@ -1,6 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
+
+/* The 3D machine owns a WebGL context and the three.js bundle, so it loads
+ * only in the browser (never during SSR) and code-splits out of the main page. */
+const HeroMachine = dynamic(() => import("./HeroMachine"), { ssr: false });
 
 /**
  * MyCBCT — public homepage.
@@ -12,30 +17,16 @@ import React, { useState, useEffect, useRef } from "react";
  */
 /* Inline demo of the scan viewer for the homepage. Synthetic scan (no real
  * patient). Drag across the image or use the slider; press play to cine. */
-function Swoosh({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 107.9684 102.6351" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path fill="#222559" d="M31.0428.6435s-5.2,2.66-10.08,12.41c-.09.18,9.08.35,15.58,6.68,0,0,6.02-4.39,10.68-7.31,2.85-1.79,5.87-3.65,5.87-3.65,0,0-8.87-8.14-22.05-8.14v.01Z" />
-      <path fill="#36b886" d="M55.7628,8.6035l15.04,11.12s17.2-10.18,29.12-4.37c7.66,3.73,8.02,12.64,8.02,12.64,0,0,1.42-16.46-16.91-25.2-18.33-8.73-35.26,5.79-35.26,5.79h0l-.01.02Z" />
-      <path fill="#36b886" d="M107.4228,30.4535s-.92,5.84-3.6,12.08c-2.67,6.23-4.63,7.66-4.63,7.66,0,0-3.12-5.34-7.48-10.68-4.31-5.27-5.79-5.97-5.79-5.97,0,0,5.16-5.08,6.23-17.71,0,0,11.22-.54,15.22,14.52" />
-      <path fill="#e42b64" d="M7.7828,51.9535s2.31,4.81,6.68,10.24c4.36,5.43,7.66,8.81,7.66,8.81,0,0-3.75,6.23-4,11.31-.27,5.08-.18,5.7-.18,5.7,0,0-17.18-.71-17.89-12.64-.8-13.24,7.75-23.41,7.75-23.41h-.01l-.01-.01Z" />
-      <path fill="#e42b64" d="M1.7228,84.5435s9.88,7.77,21.37,4.81c10.51-2.72,13.35-5.34,13.35-5.34,0,0,4.1,1.06,9.25,5.25,5.16,4.19,5.34,5.34,5.34,5.34,0,0-28.58,23.14-49.32-10.06,0,0,.01,0,.01,0Z" />
-      <path fill="#e7ae3b" d="M71.7928,84.4635l-14.96,9.88s6.77,8.15,19.5,8.29c10.39.1,14.91-4.7,14.18-13.16,0,0-1.73,4.16-18.73-5.01h.01Z" />
-      <path fill="#222559" d="M21.9928,29.1935c12.34,19.48,31.37,39.48,31.37,39.48,0,0-1.75,2.85-7.89,6.36s-10.53,4.16-10.53,4.16c0,0-13.62-5.5-28.76-34.01C-8.9672,16.6835,12.1228,3.3035,28.1328.6735c0,0-17.95,9.86-6.14,28.52Z" />
-      <path fill="#e7ae3b" d="M57.4528,34.2435s1.87-2.31,7.39-5.43c5.52-3.12,8.02-3.83,8.02-3.83,0,0,13,4.19,27.68,29.29,14.69,25.1,5.43,38.91-10.42,45.49,0,0,15.76-17.89-32.68-65.53h0l.01.01Z" />
-    </svg>
-  );
-}
+const BRAND_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 270.3732 102.6351"><defs><style>.uuid-b299beaf-6bf3-4cea-b940-89f19d3a18a5{fill:#e7ae3b;}.uuid-903041fb-b8c1-4326-b039-3353d6eeb63c{fill:#36b886;}.uuid-043d19b3-42fa-402e-9335-7880c2d84de1{fill:#e42b64;}.uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7{fill:#fff;}.uuid-643dab37-2a43-4a61-a479-7400f6af9332{fill:#222559;}</style></defs><path class="uuid-643dab37-2a43-4a61-a479-7400f6af9332" d="M31.0428.6435s-5.2,2.66-10.08,12.41c-.09.18,9.08.35,15.58,6.68,0,0,6.02-4.39,10.68-7.31,2.85-1.79,5.87-3.65,5.87-3.65,0,0-8.87-8.14-22.05-8.14v.01Z"/><path class="uuid-903041fb-b8c1-4326-b039-3353d6eeb63c" d="M55.7628,8.6035l15.04,11.12s17.2-10.18,29.12-4.37c7.66,3.73,8.02,12.64,8.02,12.64,0,0,1.42-16.46-16.91-25.2-18.33-8.73-35.26,5.79-35.26,5.79h0l-.01.02Z"/><path class="uuid-903041fb-b8c1-4326-b039-3353d6eeb63c" d="M107.4228,30.4535s-.92,5.84-3.6,12.08c-2.67,6.23-4.63,7.66-4.63,7.66,0,0-3.12-5.34-7.48-10.68-4.31-5.27-5.79-5.97-5.79-5.97,0,0,5.16-5.08,6.23-17.71,0,0,11.22-.54,15.22,14.52"/><path class="uuid-043d19b3-42fa-402e-9335-7880c2d84de1" d="M7.7828,51.9535s2.31,4.81,6.68,10.24c4.36,5.43,7.66,8.81,7.66,8.81,0,0-3.75,6.23-4,11.31-.27,5.08-.18,5.7-.18,5.7,0,0-17.18-.71-17.89-12.64-.8-13.24,7.75-23.41,7.75-23.41h-.01l-.01-.01Z"/><path class="uuid-043d19b3-42fa-402e-9335-7880c2d84de1" d="M1.7228,84.5435s9.88,7.77,21.37,4.81c10.51-2.72,13.35-5.34,13.35-5.34,0,0,4.1,1.06,9.25,5.25,5.16,4.19,5.34,5.34,5.34,5.34,0,0-28.58,23.14-49.32-10.06,0,0,.01,0,.01,0Z"/><path class="uuid-b299beaf-6bf3-4cea-b940-89f19d3a18a5" d="M71.7928,84.4635l-14.96,9.88s6.77,8.15,19.5,8.29c10.39.1,14.91-4.7,14.18-13.16,0,0-1.73,4.16-18.73-5.01h.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M120.5828,21.5635c.02-12.29,12.13-15.31,22.04-15.36,14.07-.07,21.82,6.76,21.94,15.57.04,6.69-5.53,12.57-12.47,13.88,7.12,1.32,13.68,7.22,13.72,14.52.05,9.33-7.8,16.82-22.71,16.89-10.26.05-23.24-2.85-23.3-15.74l4.41-.02c.13,10.68,11.42,11.55,18.96,11.52,12.46-.06,18.36-5.76,18.33-12.47-.02-6.19-6.34-12.68-18.54-12.62l-9.83.05-.02-3.82,9.58-.05c11.79-.06,17.68-6.44,17.73-12.13.06-6.19-5.91-11.83-17.68-11.77-7.21.04-17.88,1.44-17.83,11.53l-4.32.02h-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M177.2828,38.5835c4.71-6.8,11.57-8.44,18.95-8.48,11.19-.05,23.17,5.05,23.23,18.2.06,13.47-11.94,18.37-23.13,18.42-11.27.06-23.41-4.97-23.49-18.36l-.12-25.93c-.05-11.19,11.19-16.5,22.47-16.56,11.86-.06,21.89,4.9,22.7,14.89l-4.58.02c-.54-7.12-8.36-10.89-18.1-10.84-8.98.05-18.03,4.25-17.99,12.46l.07,16.19h-.01v-.01ZM214.9628,48.3135c-.05-9.74-10.24-14.1-18.71-14.06-8.48.04-18.8,4.42-18.84,14.16-.04,10.68,10.4,14.01,18.88,13.98,8.48-.04,18.71-3.23,18.66-14.07l.01-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M224.8728,29.1035c-.15-31.11,45.28-31.25,45.43-.22l.07,14.16c.15,31.02-45.28,31.33-45.43.22l-.07-14.16ZM229.4428,43.2435c.12,25.42,36.57,25.16,36.45-.18l-.07-14.16c-.12-25.26-36.57-25.16-36.45.18l.07,14.16h0Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M136.5228,75.5235l-7.33,18.13h-1.49l-7.51-18.04h1.49l6.76,16.45,6.6-16.52h1.49l-.01-.02Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M145.1628,76.6435c0,1.35-2.03,1.35-2.03,0s2.03-1.35,2.03,0ZM143.5128,80.7435l.06,12.78h1.26l-.06-12.79h-1.26v.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M162.4328,83.0335c-1.3-1.13-2.56-1.32-3.98-1.32-1.98-.01-3.89.75-3.83,2.36.06,1.7,2.28,2.02,3.88,2.3,2.26.38,5.38.75,5.27,3.71-.06,2.8-2.97,3.57-5.21,3.59-2.24,0-4.47-.83-5.58-2.52l.92-.83c1.06,1.52,2.97,2.15,4.68,2.14,1.54,0,3.89-.43,3.95-2.44.04-1.84-2.07-2.18-4.16-2.51-2.47-.4-4.92-.86-4.97-3.4-.04-2.5,2.46-3.6,5.03-3.59,1.86,0,3.48.5,4.75,1.68l-.77.83h.02Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M182.1728,93.3335v-2.29c-.98,1.76-2.75,2.48-4.53,2.52-3.4.01-5.75-2.06-5.78-5.59l-.04-7.34h1.26l.04,7.31c.01,2.89,1.8,4.42,4.55,4.38,2.63-.04,4.44-2.03,4.43-4.66l-.04-7.09h1.26l.06,12.75h-1.24.01l.02.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M204.2128,80.4935c.02,4.25.04,8.48.06,12.73h-1.26v-2.7c-1.24,1.99-3.15,2.93-5.2,2.94-3.55.01-6.47-2.64-6.5-6.54s2.88-6.54,6.44-6.55c2.06,0,4.15.93,5.21,2.91v-2.78h1.25v-.01ZM192.5728,86.9235c.01,3.19,2.35,5.32,5.23,5.31,7.09-.04,7.04-10.67-.05-10.64-2.89.01-5.19,2.14-5.18,5.34h0v-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M214.1928,75.1435l.09,18.04h-1.26l-.09-18.03h1.26v-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M224.7028,76.2535c0,1.35-2.03,1.35-2.03,0s2.03-1.35,2.03,0ZM223.0528,80.3535l.06,12.78h1.26l-.06-12.79h-1.26v.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M241.9728,82.6335c-1.3-1.13-2.56-1.32-3.98-1.32-1.98-.01-3.89.75-3.83,2.36.06,1.7,2.28,2.02,3.88,2.3,2.26.38,5.38.75,5.27,3.71-.06,2.8-2.97,3.57-5.21,3.59-2.24,0-4.47-.83-5.58-2.52l.92-.83c1.06,1.52,2.97,2.15,4.68,2.14,1.54,0,3.89-.43,3.95-2.44.04-1.84-2.07-2.18-4.16-2.51-2.47-.4-4.92-.86-4.97-3.4-.04-2.5,2.46-3.6,5.03-3.59,1.86,0,3.48.5,4.75,1.68l-.77.83h.02Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M250.7028,86.6435c-.02-3.82,2.85-6.58,6.44-6.6,3.59-.02,6.79,2.15,6.33,7.14l-11.47.06c.27,2.99,2.57,4.7,5.2,4.69,1.68,0,3.63-.69,4.58-1.96l.91.72c-1.22,1.63-3.44,2.46-5.47,2.47-3.59.01-6.47-2.47-6.5-6.51h-.01l-.01-.01ZM262.3128,86.0635c-.04-3.15-2.11-4.88-5.18-4.87-2.63.01-4.88,1.8-5.15,4.92,0,0,10.33-.05,10.33-.05Z"/><path class="uuid-643dab37-2a43-4a61-a479-7400f6af9332" d="M21.9928,29.1935c12.34,19.48,31.37,39.48,31.37,39.48,0,0-1.75,2.85-7.89,6.36s-10.53,4.16-10.53,4.16c0,0-13.62-5.5-28.76-34.01C-8.9672,16.6835,12.1228,3.3035,28.1328.6735c0,0-17.95,9.86-6.14,28.52Z"/><path class="uuid-b299beaf-6bf3-4cea-b940-89f19d3a18a5" d="M57.4528,34.2435s1.87-2.31,7.39-5.43c5.52-3.12,8.02-3.83,8.02-3.83,0,0,13,4.19,27.68,29.29,14.69,25.1,5.43,38.91-10.42,45.49,0,0,15.76-17.89-32.68-65.53h0l.01.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M120.5828,21.5635c.02-12.29,12.13-15.31,22.04-15.36,14.07-.07,21.82,6.76,21.94,15.57.04,6.69-5.53,12.57-12.47,13.88,7.12,1.32,13.68,7.22,13.72,14.52.05,9.33-7.8,16.82-22.71,16.89-10.26.05-23.24-2.85-23.3-15.74l4.41-.02c.13,10.68,11.42,11.55,18.96,11.52,12.46-.06,18.36-5.76,18.33-12.47-.02-6.19-6.34-12.68-18.54-12.62l-9.83.05-.02-3.82,9.58-.05c11.79-.06,17.68-6.44,17.73-12.13.06-6.19-5.91-11.83-17.68-11.77-7.21.04-17.88,1.44-17.83,11.53l-4.32.02h-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M177.2828,38.5835c4.71-6.8,11.57-8.44,18.95-8.48,11.19-.05,23.17,5.05,23.23,18.2.06,13.47-11.94,18.37-23.13,18.42-11.27.06-23.41-4.97-23.49-18.36l-.12-25.93c-.05-11.19,11.19-16.5,22.47-16.56,11.86-.06,21.89,4.9,22.7,14.89l-4.58.02c-.54-7.12-8.36-10.89-18.1-10.84-8.98.05-18.03,4.25-17.99,12.46l.07,16.19h-.01v-.01ZM214.9628,48.3135c-.05-9.74-10.24-14.1-18.71-14.06-8.48.04-18.8,4.42-18.84,14.16-.04,10.68,10.4,14.01,18.88,13.98,8.48-.04,18.71-3.23,18.66-14.07l.01-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M224.8728,29.1035c-.15-31.11,45.28-31.25,45.43-.22l.07,14.16c.15,31.02-45.28,31.33-45.43.22l-.07-14.16ZM229.4428,43.2435c.12,25.42,36.57,25.16,36.45-.18l-.07-14.16c-.12-25.26-36.57-25.16-36.45.18l.07,14.16h0Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M136.5228,75.5235l-7.33,18.13h-1.49l-7.51-18.04h1.49l6.76,16.45,6.6-16.52h1.49l-.01-.02Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M145.1628,76.6435c0,1.35-2.03,1.35-2.03,0s2.03-1.35,2.03,0ZM143.5128,80.7435l.06,12.78h1.26l-.06-12.79h-1.26v.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M162.4328,83.0335c-1.3-1.13-2.56-1.32-3.98-1.32-1.98-.01-3.89.75-3.83,2.36.06,1.7,2.28,2.02,3.88,2.3,2.26.38,5.38.75,5.27,3.71-.06,2.8-2.97,3.57-5.21,3.59-2.24,0-4.47-.83-5.58-2.52l.92-.83c1.06,1.52,2.97,2.15,4.68,2.14,1.54,0,3.89-.43,3.95-2.44.04-1.84-2.07-2.18-4.16-2.51-2.47-.4-4.92-.86-4.97-3.4-.04-2.5,2.46-3.6,5.03-3.59,1.86,0,3.48.5,4.75,1.68l-.77.83h.02Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M182.1728,93.3335v-2.29c-.98,1.76-2.75,2.48-4.53,2.52-3.4.01-5.75-2.06-5.78-5.59l-.04-7.34h1.26l.04,7.31c.01,2.89,1.8,4.42,4.55,4.38,2.63-.04,4.44-2.03,4.43-4.66l-.04-7.09h1.26l.06,12.75h-1.24.01l.02.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M204.2128,80.4935c.02,4.25.04,8.48.06,12.73h-1.26v-2.7c-1.24,1.99-3.15,2.93-5.2,2.94-3.55.01-6.47-2.64-6.5-6.54s2.88-6.54,6.44-6.55c2.06,0,4.15.93,5.21,2.91v-2.78h1.25v-.01ZM192.5728,86.9235c.01,3.19,2.35,5.32,5.23,5.31,7.09-.04,7.04-10.67-.05-10.64-2.89.01-5.19,2.14-5.18,5.34h0v-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M214.1928,75.1435l.09,18.04h-1.26l-.09-18.03h1.26v-.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M224.7028,76.2535c0,1.35-2.03,1.35-2.03,0s2.03-1.35,2.03,0ZM223.0528,80.3535l.06,12.78h1.26l-.06-12.79h-1.26v.01Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M241.9728,82.6335c-1.3-1.13-2.56-1.32-3.98-1.32-1.98-.01-3.89.75-3.83,2.36.06,1.7,2.28,2.02,3.88,2.3,2.26.38,5.38.75,5.27,3.71-.06,2.8-2.97,3.57-5.21,3.59-2.24,0-4.47-.83-5.58-2.52l.92-.83c1.06,1.52,2.97,2.15,4.68,2.14,1.54,0,3.89-.43,3.95-2.44.04-1.84-2.07-2.18-4.16-2.51-2.47-.4-4.92-.86-4.97-3.4-.04-2.5,2.46-3.6,5.03-3.59,1.86,0,3.48.5,4.75,1.68l-.77.83h.02Z"/><path class="uuid-da3b86f9-2ca5-4024-82f2-cf13103c0dc7" d="M250.7028,86.6435c-.02-3.82,2.85-6.58,6.44-6.6,3.59-.02,6.79,2.15,6.33,7.14l-11.47.06c.27,2.99,2.57,4.7,5.2,4.69,1.68,0,3.63-.69,4.58-1.96l.91.72c-1.22,1.63-3.44,2.46-5.47,2.47-3.59.01-6.47-2.47-6.5-6.51h-.01l-.01-.01ZM262.3128,86.0635c-.04-3.15-2.11-4.88-5.18-4.87-2.63.01-4.88,1.8-5.15,4.92,0,0,10.33-.05,10.33-.05Z"/></svg>`;
 
-function HmLockup() {
+function HmLockup({ className = "" }) {
   return (
-    <div className="hm-lockup">
-      <Swoosh className="hm-logoicon" />
-      <span className="hm-locktext">
-        <span className="hm-lockname">MyCBCT</span>
-        <span className="hm-lockby">by 360 Visualise</span>
-      </span>
-    </div>
+    <span
+      className={"hm-brand " + className}
+      role="img"
+      aria-label="360 Visualise"
+      dangerouslySetInnerHTML={{ __html: BRAND_SVG }}
+    />
   );
 }
 
@@ -63,6 +54,11 @@ function DemoViewer() {
     const t = setInterval(() => setIdx((i) => (i + 1) % total), 95);
     return () => clearInterval(t);
   }, [playing, total]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPlaying(false);
+  }, []);
 
   useEffect(() => {
     const c = cv.current; if (!c) return;
@@ -135,6 +131,7 @@ function DemoViewer() {
     <div className="hm-dvcard">
       <div className="hm-dvstage">
         <canvas ref={cv} width={640} height={440} className="hm-dvcanvas"
+          role="img" aria-label="Interactive demo CBCT scan — drag to move through the slices"
           style={{ touchAction: "none", cursor: "ew-resize" }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} />
         <span className="hm-dvbanner">Demo scan · preview only</span>
@@ -167,7 +164,7 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
   }, []);
 
   const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,600&family=DM+Sans:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:wght@400;500;600&display=swap');
   .hm * { box-sizing:border-box; margin:0; padding:0; }
   .hm {
     --ink:#0e1b2e; --navy:#16243b; --gold:#e7ae3b; --gold-deep:#c8902a;
@@ -200,13 +197,17 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
   .hm-btn.ghost { background:transparent; border:1.5px solid rgba(255,255,255,.3); color:#fff; }
   .hm-btn.ghost:hover { border-color:#fff; }
   @media (max-width:860px){ .hm-navlinks{ display:none; } }
+  .hm-brand { display:inline-flex; align-items:center; height:40px; }
+  .hm-brand.foot { height:46px; }
+  .hm-brand svg { height:100%; width:auto; display:block; }
+  @media (max-width:560px){ .hm-brand{ height:34px; } }
 
   /* hero */
   .hm-hero { background:
       radial-gradient(900px 500px at 88% -5%, rgba(231,174,59,.16), transparent 60%),
       radial-gradient(700px 500px at -5% 10%, rgba(19,117,98,.10), transparent 55%),
       var(--ink);
-    color:#fff; padding:148px 0 92px; position:relative; }
+    color:#fff; padding:156px 0 116px; position:relative; }
   .hm-herogrid { display:grid; grid-template-columns:1.1fr .9fr; gap:54px; align-items:center; }
   @media (max-width:900px){ .hm-herogrid{ grid-template-columns:1fr; gap:40px; } }
   .hm-kicker { display:inline-flex; align-items:center; gap:9px; font-size:13px; letter-spacing:.04em; color:var(--gold); background:rgba(231,174,59,.12); border:1px solid rgba(231,174,59,.3); padding:7px 14px; border-radius:99px; font-weight:600; }
@@ -217,14 +218,18 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
   .hm-heroctas { display:flex; gap:14px; margin-top:30px; flex-wrap:wrap; }
   .hm-trust { margin-top:28px; font-size:13.5px; color:rgba(255,255,255,.6); display:flex; align-items:center; gap:9px; }
   .hm-trust b { color:#fff; font-weight:600; }
+  .hm-herobullets { list-style:none; margin-top:26px; display:grid; grid-template-columns:1fr 1fr; gap:14px 24px; max-width:520px; }
+  .hm-herobullets li { display:flex; gap:10px; align-items:flex-start; font-size:13px; line-height:1.45; color:rgba(255,255,255,.62); }
+  .hm-herobullets li b { display:block; color:#fff; font-weight:600; font-size:14px; margin-bottom:2px; }
+  .hm-herobullets .tk { width:19px; height:19px; min-width:19px; margin-top:1px; border-radius:99px; background:var(--gold); color:var(--ink); display:grid; place-items:center; }
+  @media (max-width:560px){ .hm-herobullets{ grid-template-columns:1fr; } }
 
   /* hero visual — portal/scan card */
   .hm-visual { position:relative; }
   .hm-pcard { background:var(--navy); border:1px solid rgba(255,255,255,.1); border-radius:20px; padding:18px; box-shadow:0 50px 90px -50px rgba(0,0,0,.8); }
   .hm-pbar { display:flex; align-items:center; gap:7px; margin-bottom:14px; }
   .hm-pdot { width:9px; height:9px; border-radius:99px; background:rgba(255,255,255,.2); }
-  .hm-scan { aspect-ratio:16/11; border-radius:13px; background:radial-gradient(circle at 50% 45%, #2a3142 0%, #0d1119 75%); position:relative; overflow:hidden; display:grid; place-items:center; }
-  .hm-scan svg { opacity:.9; }
+  .hm-scan { aspect-ratio:4/5; border-radius:13px; background:radial-gradient(circle at 50% 42%, #2a3142 0%, #0d1119 78%); position:relative; overflow:hidden; }
   .hm-scanlbl { position:absolute; left:12px; bottom:11px; font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:#0e1b2e; background:var(--gold); padding:5px 9px; border-radius:6px; }
   .hm-prow { display:flex; align-items:center; gap:11px; margin-top:14px; padding:12px 14px; background:rgba(255,255,255,.05); border-radius:12px; }
   .hm-pico { width:34px; height:34px; border-radius:9px; background:rgba(231,174,59,.18); color:var(--gold); display:grid; place-items:center; flex:none; }
@@ -309,6 +314,21 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
   .hm-foot ul a { color:rgba(255,255,255,.82); text-decoration:none; font-size:14.5px; cursor:pointer; }
   .hm-foot ul a:hover { color:var(--gold); }
   .hm-footbottom { display:flex; justify-content:space-between; align-items:center; padding-top:24px; font-size:13px; color:rgba(255,255,255,.5); flex-wrap:wrap; gap:10px; }
+  .hm-footbottom a { color:inherit; text-decoration:none; }
+  .hm-footbottom a:hover { color:var(--gold); }
+
+  /* smooth in-page scrolling, offset for the fixed nav */
+  html { scroll-behavior:smooth; }
+  #why, #how, #reporting, #contact { scroll-margin-top:88px; }
+
+  /* visible keyboard focus */
+  .hm a:focus-visible, .hm-btn:focus-visible, .hm-signin:focus-visible,
+  .hm-dvtab:focus-visible, .hm-dvplay:focus-visible, .hm-dvscrub:focus-visible {
+    outline:2px solid var(--gold); outline-offset:2px; border-radius:8px;
+  }
+
+  /* respect users who prefer reduced motion */
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
   `;
 
   const Tooth = () => (
@@ -335,7 +355,7 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
         <div className="hm-wrap hm-navin">
           <HmLockup />
           <div className="hm-navlinks">
-            <a>How it works</a><a>Reporting</a><a>For practices</a><a>Contact</a>
+            <a href="#how">How it works</a><a href="#reporting">Reporting</a><a href="#why">For practices</a><a href="#contact">Contact</a>
           </div>
           <div className="hm-navcta">
             <button className="hm-signin" onClick={onSignIn}>Sign in</button>
@@ -356,12 +376,18 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
               <button className="hm-btn ghost lg" onClick={onSignIn}>Practice sign in</button>
             </div>
             <div className="hm-trust">Reported by a <b>GDC-registered consultant</b> in Dental &amp; Maxillofacial Radiology.</div>
+            <ul className="hm-herobullets">
+              <li><span className="tk"><Tick /></span><span><b>Fast turnaround</b>Images back the same day, reports in days.</span></li>
+              <li><span className="tk"><Tick /></span><span><b>Specialist reports</b>Consultant-reported, with annotated key images.</span></li>
+              <li><span className="tk"><Tick /></span><span><b>Secure UK storage</b>Every scan kept safely in the UK to download.</span></li>
+              <li><span className="tk"><Tick /></span><span><b>Effortless booking</b>Book at referral, or send a pay-link.</span></li>
+            </ul>
           </div>
 
           <div className="hm-visual">
             <div className="hm-pcard">
               <div className="hm-pbar"><span className="hm-pdot" /><span className="hm-pdot" /><span className="hm-pdot" /></div>
-              <div className="hm-scan"><Tooth /><span className="hm-scanlbl">CBCT · single jaw</span></div>
+              <div className="hm-scan"><HeroMachine /><span className="hm-scanlbl">CBCT scanner · live 3D</span></div>
               <div className="hm-prow">
                 <span className="hm-pico">{ic.report}</span>
                 <div><div className="hm-pt">Consultant report</div><div className="hm-pd">Mrs J. Carter · single jaw</div></div>
@@ -374,7 +400,7 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
       </header>
 
       {/* VALUE PROPS */}
-      <section className="hm-props">
+      <section className="hm-props" id="why">
         <div className="hm-wrap hm-props-grid">
           <div className="hm-prop"><div className="ic">{ic.bolt}</div><h3>Fast turnaround</h3><p>Images ready as soon as your patient's scanned, with reports back in days, not weeks.</p></div>
           <div className="hm-prop"><div className="ic">{ic.report}</div><h3>Specialist reports</h3><p>Optional consultant reporting with annotated key images — clear, clinical, and easy to act on.</p></div>
@@ -394,7 +420,7 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="hm-sec">
+      <section className="hm-sec" id="how">
         <div className="hm-wrap">
           <div className="hm-eyebrow">How it works</div>
           <h2 className="hm-sech2">Three steps, no faff</h2>
@@ -408,7 +434,7 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
       </section>
 
       {/* REPORTING BAND */}
-      <section className="hm-wrap" style={{ paddingBottom: 70 }}>
+      <section className="hm-wrap" id="reporting" style={{ paddingBottom: 70 }}>
         <div className="hm-report">
           <div>
             <div className="eb">Reporting</div>
@@ -437,23 +463,23 @@ export default function Home({ onRefer = () => {}, onSignIn = () => {} }) {
       </section>
 
       {/* FOOTER */}
-      <footer className="hm-foot">
+      <footer className="hm-foot" id="contact">
         <div className="hm-wrap">
           <div className="hm-footgrid">
             <div>
-              <HmLockup />
+              <HmLockup className="foot" />
               <p className="blurb">A Yorkshire CBCT scanning centre for dental practices — specialist imaging, consultant reporting, and a portal built around your day.</p>
             </div>
             <div>
               <h4>Service</h4>
-              <ul><li><a onClick={onRefer}>Refer a patient</a></li><li><a>How it works</a></li><li><a>Reporting</a></li><li><a onClick={onSignIn}>Practice sign in</a></li></ul>
+              <ul><li><a onClick={onRefer}>Refer a patient</a></li><li><a href="#how">How it works</a></li><li><a href="#reporting">Reporting</a></li><li><a onClick={onSignIn}>Practice sign in</a></li></ul>
             </div>
             <div>
               <h4>Contact</h4>
-              <ul><li><a>hello@mycbct.co.uk</a></li><li><a>Yorkshire</a></li><li><a>Are you a patient?</a></li></ul>
+              <ul><li><a href="mailto:hello@mycbct.co.uk">hello@mycbct.co.uk</a></li><li><span style={{ color: "rgba(255,255,255,.82)", fontSize: "14.5px" }}>Yorkshire</span></li><li><a>Are you a patient?</a></li></ul>
             </div>
           </div>
-          <div className="hm-footbottom"><span>© {new Date().getFullYear()} MyCBCT · part of 360 Visualise</span><span>Privacy · Terms</span></div>
+          <div className="hm-footbottom"><span>© {new Date().getFullYear()} MyCBCT · part of 360 Visualise</span><span>Privacy · <a href="/terms">Terms</a></span></div>
         </div>
       </footer>
     </div>
