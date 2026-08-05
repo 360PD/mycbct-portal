@@ -1,3 +1,4 @@
+import GlobalSearch from "@/components/GlobalSearch";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -298,6 +299,8 @@ export default async function DashboardPage({ searchParams }) {
         <h1 className="db-hi">Welcome back, {name}.</h1>
         <p className="db-meta">{email} &middot; role: <b>{role}</b></p>
 
+        {(role === "staff" || role === "admin") && <GlobalSearch />}
+
         {/* ================= STAFF / ADMIN VIEW ================= */}
         {isStaff && (
           <>
@@ -319,6 +322,7 @@ export default async function DashboardPage({ searchParams }) {
             <div className="db-head">
               <h2>Action queue</h2>
               <div className="db-actions">
+                <a className="db-new ghost" href="/search">Search</a>
                 <a className="db-new ghost" href="/diary">Schedule</a>
                 <a className="db-new ghost" href="/diary-view">Diary</a>
                 <a className="db-new ghost" href="/practices">Practices</a>

@@ -103,6 +103,7 @@ export default async function PracticesPage() {
         </p>
 
         <div className="pr-head-actions">
+          <a className="pr-add" href="/search" style={{ marginRight: 10 }}>Search</a>
           <a className="pr-add" href="/add-dentist">Add a dentist</a>
         </div>
 
