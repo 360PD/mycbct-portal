@@ -1,105 +1,87 @@
-import { createClient } from "@/lib/supabase/server";
-import { renderEmail } from "@/lib/emails/layout";
+/**
+ * One-off: render the five branded emails with sample data → preview/*.html
+ * Does not send anything.
+ *
+ *   npx --yes tsx scripts/render-email-previews.ts
+ */
+import fs from "fs";
+import path from "path";
+import { renderEmail } from "../lib/emails/layout";
+import { fmtAppointmentDateTimeUK } from "../lib/emails/send-appointment-confirmation";
 
-export function fmtAppointmentDateTimeUK(iso: string) {
-  const d = new Date(iso);
-  const datePart = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(d);
+const OUT = path.join(process.cwd(), "preview");
+fs.mkdirSync(OUT, { recursive: true });
 
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).formatToParts(d);
-
-  const hour = parts.find((p) => p.type === "hour")?.value || "";
-  const minute = parts.find((p) => p.type === "minute")?.value || "00";
-  const dayPeriod = parts.find((p) => p.type === "dayPeriod")?.value?.toLowerCase() || "";
-
-  return `${datePart} at ${hour}:${minute}${dayPeriod}`;
-}
-
-function fmtMoneyGBP(pence: number | null | undefined) {
-  const amount = Number(pence) || 0;
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount / 100);
-}
-
-const DEFAULT_REPORT_FEE_PENCE = 12000;
-
-const DIRECTIONS_URL =
+const patientName = "Emma Thompson";
+const patientDob = "12 March 1987";
+const scanType = "Full arch CBCT";
+const practiceName = "Bellegrove Dental";
+const signatureName = "Dr Sarah Mitchell";
+const ref = "A1B2C3D4";
+const referralId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+const appointmentWhen = fmtAppointmentDateTimeUK("2026-07-30T09:30:00.000Z"); // 10:30 UK BST
+const signin = "https://mycbct-portal.vercel.app/sign-in";
+const referralUrl = `https://mycbct-portal.vercel.app/referrals/${referralId}`;
+const dashboardUrl = "https://mycbct-portal.vercel.app/dashboard";
+const directionsUrl =
   "https://www.google.com/maps/place/360+Visualise/data=!4m2!3m1!1s0x0:0x9d119d3ce060fd51?sa=X&ved=1t:2428&ictx=111";
 
-type AppointmentEmailOpts = {
-  to: string;
-  startsAtISO: string;
-  referralId: string;
-  patientFirstName?: string | null;
-  patientLastName?: string | null;
-  dentistName?: string | null;
-};
-
-// Best-effort patient confirmation. Never throws — booking must not depend on mail.
-export async function sendAppointmentConfirmation({
-  to,
-  startsAtISO,
-  referralId,
-  patientFirstName,
-  patientLastName,
-  dentistName,
-}: AppointmentEmailOpts) {
-  const key = process.env.RESEND_API_KEY;
-  const email = String(to || "").trim();
-  if (!key || !email) return;
-
-  const appointmentWhen = fmtAppointmentDateTimeUK(startsAtISO);
-
-  let scanFee = "£0.00";
-  let reportFee = fmtMoneyGBP(DEFAULT_REPORT_FEE_PENCE);
-  let reportFeeRow = "";
-  let totalFee = "£0.00";
-
-  try {
-    const supabase = await createClient();
-    const { data: ref } = await supabase
-      .from("referrals")
-      .select("scan_fee_pence, report_fee_pence, report_requested")
-      .eq("id", referralId)
-      .maybeSingle();
-
-    const scanPence = Number(ref?.scan_fee_pence) || 0;
-    const reportPence = Number(ref?.report_fee_pence) || DEFAULT_REPORT_FEE_PENCE;
-    const reportRequested = !!ref?.report_requested;
-
-    scanFee = fmtMoneyGBP(scanPence);
-    reportFee = fmtMoneyGBP(reportPence);
-    const totalPence = scanPence + (reportRequested ? reportPence : 0);
-    totalFee = fmtMoneyGBP(totalPence);
-
-    if (reportRequested) {
-      reportFeeRow = `
+const scanFee = "£95.00";
+const reportFee = "£120.00";
+const totalFee = "£215.00";
+const reportFeeRow = `
               <tr>
                 <td style="padding:8px 0;font-size:15px;color:#4A5A6B;">Radiologist report</td>
                 <td style="padding:8px 0;font-size:15px;color:#12263C;text-align:right;font-weight:600;">${reportFee}</td>
               </tr>`;
-    }
-  } catch (e) {
-    console.error("appointment confirmation fee lookup failed:", e);
-  }
 
-  void dentistName;
+function detailsTable() {
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;margin:0 0 8px 0;">
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Reference</td><td style="padding:6px 0;color:#12263C;"><strong>${ref}</strong></td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Patient</td><td style="padding:6px 0;color:#12263C;"><strong>${patientName}</strong></td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Practice</td><td style="padding:6px 0;color:#12263C;">${practiceName}</td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Scan type</td><td style="padding:6px 0;color:#12263C;">${scanType}</td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Referred by</td><td style="padding:6px 0;color:#12263C;">${signatureName}</td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Consultant report</td><td style="padding:6px 0;color:#12263C;">Requested</td></tr>
+    </table>
+  `;
+}
 
-  const bodyHtml = `
+function write(name: string, html: string, subject: string) {
+  const file = path.join(OUT, name);
+  // Comment at top so previewing in a browser still shows the subject line.
+  const withMeta = `<!-- Subject: ${subject} -->\n${html}`;
+  fs.writeFileSync(file, withMeta, "utf8");
+  console.log("wrote", file);
+}
+
+// 1) Scan ready (dentist)
+write(
+  "scan-ready.html",
+  renderEmail({
+    preheader: `The scan you referred for ${patientName} is ready to view.`,
+    heading: "Scan ready",
+    bodyHtml: `
+        <p style="margin:0 0 14px 0;">
+          The scan you referred for <strong style="color:#12263C;">${patientName}</strong> has been completed and is ready to view.
+        </p>
+        <p style="margin:0 0 12px 0;">
+          Log in to MyCBCT to view and download it.
+        </p>`,
+    button: { label: "View the scan", url: signin },
+    footnote: `If the button doesn't work, paste this link into your browser:<br><a href="${signin}" style="color:#3E6E9E; word-break:break-all;">${signin}</a>`,
+  }),
+  `Scan ready: ${patientName}`
+);
+
+// 2) Appointment confirmation (patient)
+write(
+  "appointment-confirmation.html",
+  renderEmail({
+    preheader: `Your CBCT scan appointment is confirmed for ${appointmentWhen}.`,
+    heading: "Your scan appointment is confirmed.",
+    bodyHtml: `
     <p style="margin:0 0 24px 0;">Everything you need to know before you arrive.</p>
 
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F0E6;border:1px solid #E8E0D0;border-radius:12px;margin-bottom:24px;">
@@ -118,7 +100,7 @@ export async function sendAppointmentConfirmation({
                 <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8A97A4;">Contact us</p>
                 <p style="margin:0;font-size:15px;color:#12263C;line-height:1.5;">01943 601222<br>hello@mycbct.co.uk</p>
                 <p style="margin:12px 0 0;">
-                  <a href="${DIRECTIONS_URL}" style="color:#E0A43B;font-size:14px;font-weight:600;text-decoration:none;">Get directions →</a>
+                  <a href="${directionsUrl}" style="color:#E0A43B;font-size:14px;font-weight:600;text-decoration:none;">Get directions →</a>
                 </p>
                 <p style="margin:6px 0 0;font-size:12px;color:#8A97A4;">what3words: ///half.river.surpassed</p>
               </td>
@@ -239,36 +221,86 @@ export async function sendAppointmentConfirmation({
       &nbsp;·&nbsp;
       <a href="mailto:hello@mycbct.co.uk" style="color:#12263C;font-weight:600;text-decoration:none;">hello@mycbct.co.uk</a>
     </p>
-  `;
-
-  const patientName = [patientFirstName, patientLastName].filter(Boolean).join(" ").trim();
-  const subject = patientName
-    ? `Your CBCT scan appointment is confirmed — ${patientName}`
-    : "Your CBCT scan appointment is confirmed — MyCBCT";
-
-  const html = renderEmail({
-    preheader: `Your CBCT scan appointment is confirmed for ${appointmentWhen}.`,
-    heading: "Your scan appointment is confirmed.",
-    bodyHtml,
+  `,
     footnote:
       "This email was sent because your dentist referred you for a CBCT scan at MyCBCT. If you have any questions, call us on 01943 601222.",
-  });
+  }),
+  `Your CBCT scan appointment is confirmed — ${patientName}`
+);
 
-  try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "MyCBCT <hello@mycbct.co.uk>",
-        to: [email],
-        subject,
-        html,
-      }),
-    });
-  } catch (e) {
-    console.error("appointment confirmation email failed:", e);
-  }
-}
+// 3) DNA notice
+write(
+  "dna-notice.html",
+  renderEmail({
+    preheader: `${patientName} did not attend their appointment.`,
+    heading: `We're sorry to let you know that ${patientName} did not attend their appointment.`,
+    bodyHtml: `
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F0E6;border:1px solid #E8E0D0;border-radius:12px;margin-bottom:24px;">
+      <tr>
+        <td style="padding:24px 28px;">
+          <p style="margin:0 0 6px;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#E0A43B;font-weight:700;">Missed appointment</p>
+          <p style="margin:0 0 20px;font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:600;color:#12263C;line-height:1.35;">${appointmentWhen}</p>
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="padding:8px 16px 8px 0;vertical-align:top;width:50%;">
+                <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8A97A4;">Scan type</p>
+                <p style="margin:0;font-size:15px;color:#12263C;line-height:1.5;">${scanType}</p>
+              </td>
+              <td style="padding:8px 0;vertical-align:top;width:50%;">
+                <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8A97A4;">Date of birth</p>
+                <p style="margin:0;font-size:15px;color:#12263C;line-height:1.5;">${patientDob}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0;">
+      We understand that circumstances sometimes prevent patients from attending. If you'd like to rebook, please contact us on
+      <a href="tel:01943601222" style="color:#12263C;font-weight:600;text-decoration:none;">01943 601222</a>
+      or
+      <a href="mailto:hello@mycbct.co.uk" style="color:#12263C;font-weight:600;text-decoration:none;">hello@mycbct.co.uk</a>
+      and we'll be happy to find a new slot.
+    </p>
+  `,
+    footnote:
+      '<a href="tel:01943601222" style="color:#8A97A4;text-decoration:none;">01943 601222</a> &nbsp;·&nbsp; <a href="mailto:hello@mycbct.co.uk" style="color:#8A97A4;text-decoration:none;">hello@mycbct.co.uk</a>',
+  }),
+  `Did not attend: ${patientName} — MyCBCT`
+);
+
+const details = detailsTable();
+
+// 4) New referral (team)
+write(
+  "new-referral.html",
+  renderEmail({
+    preheader: `New referral for ${patientName} — ${scanType}.`,
+    heading: "New referral received",
+    bodyHtml: details,
+    button: { label: "Open this referral in MyCBCT", url: referralUrl },
+  }),
+  `New referral: ${patientName} — ${scanType} (${practiceName})`
+);
+
+// 5) Referral received (dentist)
+write(
+  "referral-received.html",
+  renderEmail({
+    preheader: `We've received your referral for ${patientName}.`,
+    heading: "Thank you — your referral is in",
+    bodyHtml: `
+          <p style="margin:0 0 20px 0;">
+            We've received your referral for <strong style="color:#12263C;">${patientName}</strong>.
+            We'll take it from here &mdash; you'll get another email when the scan
+            is ready to view.
+          </p>
+          ${details}`,
+    button: { label: "View your referrals in MyCBCT", url: dashboardUrl },
+    footnote: "Questions? Reply to this email or call 360 Visualise.",
+  }),
+  `Referral received: ${patientName} (ref ${ref})`
+);
+
+console.log("Done. Open the files in preview/ in a browser.");

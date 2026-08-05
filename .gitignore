@@ -7,6 +7,5 @@ node_modules
 .next/
 .DS_Store
 
-# build output & macOS files
-.next/
-.DS_Store
+# scratch folder for files awaiting deletion — never commit
+_to_delete/

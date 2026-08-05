@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { renderEmail } from "@/lib/emails/layout";
 
 export const runtime = "nodejs";
 
@@ -60,22 +61,19 @@ async function notifyDentist(db: any, referralId: string) {
       `The scan you referred for ${patientName} has been completed and is ready to view.\n\n` +
       `Log in to MyCBCT to view and download it:\n${signin}\n`;
 
-    const html = `
-  <div style="font-family:Arial,Helvetica,sans-serif;background:#0e1b2e;padding:32px;">
-    <div style="max-width:520px;margin:0 auto;background:#13243b;border-radius:12px;padding:28px 30px;color:#f7f4ec;">
-      <h1 style="font-size:20px;margin:0 0 16px;color:#e7ae3b;">Scan ready</h1>
-      <p style="font-size:15px;line-height:1.6;margin:0 0 14px;">
-        The scan you referred for <strong>${patientName}</strong> has been completed and is ready to view.
-      </p>
-      <p style="font-size:15px;line-height:1.6;margin:0 0 22px;">
-        Log in to MyCBCT to view and download it.
-      </p>
-      <a href="${signin}" style="display:inline-block;background:#e7ae3b;color:#0e1b2e;text-decoration:none;font-weight:bold;font-size:15px;padding:12px 22px;border-radius:8px;">View the scan</a>
-      <p style="font-size:12px;line-height:1.5;margin:24px 0 0;color:rgba(247,244,236,0.5);">
-        If the button doesn't work, paste this link into your browser:<br>${signin}
-      </p>
-    </div>
-  </div>`;
+    const html = renderEmail({
+      preheader: `The scan you referred for ${patientName} is ready to view.`,
+      heading: "Scan ready",
+      bodyHtml: `
+        <p style="margin:0 0 14px 0;">
+          The scan you referred for <strong style="color:#12263C;">${patientName}</strong> has been completed and is ready to view.
+        </p>
+        <p style="margin:0 0 12px 0;">
+          Log in to MyCBCT to view and download it.
+        </p>`,
+      button: { label: "View the scan", url: signin },
+      footnote: `If the button doesn't work, paste this link into your browser:<br><a href="${signin}" style="color:#3E6E9E; word-break:break-all;">${signin}</a>`,
+    });
 
     await fetch("https://api.resend.com/emails", {
       method: "POST",

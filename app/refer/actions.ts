@@ -1,6 +1,7 @@
 "use server";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { renderEmail } from "@/lib/emails/layout";
 
 // v5 — staff can submit referrals for a chosen practice.
 // A practiceId in the input is honoured ONLY when the signed-in user's
@@ -61,13 +62,13 @@ function detailsTable(opts: {
   reportRequested: boolean;
 }) {
   return `
-    <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Reference</td><td style="padding:4px 0;"><strong>${opts.ref}</strong></td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Patient</td><td style="padding:4px 0;"><strong>${opts.patientName}</strong></td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Practice</td><td style="padding:4px 0;">${opts.practiceName}</td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Scan type</td><td style="padding:4px 0;">${opts.scanTypeName}</td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Referred by</td><td style="padding:4px 0;">${opts.signatureName}</td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666;">Consultant report</td><td style="padding:4px 0;">${opts.reportRequested ? "Requested" : "Not requested"}</td></tr>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;margin:0 0 8px 0;">
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Reference</td><td style="padding:6px 0;color:#12263C;"><strong>${opts.ref}</strong></td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Patient</td><td style="padding:6px 0;color:#12263C;"><strong>${opts.patientName}</strong></td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Practice</td><td style="padding:6px 0;color:#12263C;">${opts.practiceName}</td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Scan type</td><td style="padding:6px 0;color:#12263C;">${opts.scanTypeName}</td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Referred by</td><td style="padding:6px 0;color:#12263C;">${opts.signatureName}</td></tr>
+      <tr><td style="padding:6px 14px 6px 0;color:#8A97A4;">Consultant report</td><td style="padding:6px 0;color:#12263C;">${opts.reportRequested ? "Requested" : "Not requested"}</td></tr>
     </table>
   `;
 }
@@ -180,17 +181,19 @@ export async function createReferral(
     reportRequested: !!input.reportRequested,
   });
 
+  const referralUrl = `https://mycbct-portal.vercel.app/referrals/${referral.id}`;
+  const dashboardUrl = "https://mycbct-portal.vercel.app/dashboard";
+
   // 3a) Team notification.
   await sendEmail(
     NOTIFY,
     `New referral: ${patientName} — ${scanType?.name || "Scan"} (${practice?.name || "Unknown practice"})`,
-    `
-      <h2 style="margin:0 0 12px;">New referral received</h2>
-      ${details}
-      <p style="font-family:Arial,sans-serif;font-size:14px;">
-        <a href="https://mycbct-portal.vercel.app/referrals/${referral.id}">Open this referral in MyCBCT</a>
-      </p>
-    `
+    renderEmail({
+      preheader: `New referral for ${patientName} — ${scanType?.name || "Scan"}.`,
+      heading: "New referral received",
+      bodyHtml: details,
+      button: { label: "Open this referral in MyCBCT", url: referralUrl },
+    })
   );
 
   // 3b) Confirmation to the submitter (dentists get their copy here;
@@ -199,21 +202,19 @@ export async function createReferral(
     await sendEmail(
       [profile.email],
       `Referral received: ${patientName} (ref ${ref})`,
-      `
-        <h2 style="margin:0 0 12px;">Thank you — your referral is in</h2>
-        <p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;">
-          We've received your referral for <strong>${patientName}</strong>.
-          We'll take it from here &mdash; you'll get another email when the scan
-          is ready to view.
-        </p>
-        ${details}
-        <p style="font-family:Arial,sans-serif;font-size:14px;">
-          <a href="https://mycbct-portal.vercel.app/dashboard">View your referrals in MyCBCT</a>
-        </p>
-        <p style="font-family:Arial,sans-serif;font-size:12px;color:#888;">
-          Questions? Reply to this email or call 360 Visualise.
-        </p>
-      `
+      renderEmail({
+        preheader: `We've received your referral for ${patientName}.`,
+        heading: "Thank you — your referral is in",
+        bodyHtml: `
+          <p style="margin:0 0 20px 0;">
+            We've received your referral for <strong style="color:#12263C;">${patientName}</strong>.
+            We'll take it from here &mdash; you'll get another email when the scan
+            is ready to view.
+          </p>
+          ${details}`,
+        button: { label: "View your referrals in MyCBCT", url: dashboardUrl },
+        footnote: "Questions? Reply to this email or call 360 Visualise.",
+      })
     );
   }
 
