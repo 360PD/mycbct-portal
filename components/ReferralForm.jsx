@@ -67,12 +67,15 @@ export default function ReferralForm({
     lastName: "",
     dob: "",
     sex: "",
+    patientPhone: "",
+    patientEmail: "",
     pregnancy: "",
     scanTypeId: "",
     arch: "", // single-jaw only: "upper" | "lower"
     regionOfInterest: "",
     clinicalNotes: "",
     reportChoice: "", // "self" | "arrange"
+    bookingMethod: "",
     signatureName: defaultSignature,
     termsAccepted: false,
   });
@@ -102,12 +105,16 @@ export default function ReferralForm({
     if (!f.lastName.trim()) e.lastName = 1;
     if (!f.dob) e.dob = 1;
     if (!f.sex) e.sex = 1;
+    if (!f.patientPhone.trim()) e.patientPhone = 1;
+    if (!f.patientEmail.trim() || !/^\S+@\S+\.\S+$/.test(f.patientEmail.trim()))
+      e.patientEmail = 1;
     if (!f.pregnancy) e.pregnancy = 1;
     if (!f.scanTypeId) e.scanTypeId = 1;
     if (chosenScan && chosenScan.code === "single_jaw" && !f.arch) e.arch = 1;
     if (!f.regionOfInterest.trim()) e.regionOfInterest = 1;
     if (!f.clinicalNotes.trim()) e.clinicalNotes = 1;
     if (!f.reportChoice) e.reportChoice = 1;
+    if (!f.bookingMethod) e.bookingMethod = 1;
     if (!f.signatureName.trim()) e.signatureName = 1;
     if (!f.termsAccepted) e.termsAccepted = 1;
     setErrors(e);
@@ -141,8 +148,16 @@ export default function ReferralForm({
         clinicalNotes: notes,
         reportRequested: f.reportChoice === "arrange",
         signatureName: f.signatureName,
+        patientPhone: f.patientPhone,
+        patientEmail: f.patientEmail,
+        bookingMethod: f.bookingMethod,
         practiceId: isStaff ? f.practiceId : undefined,
       });
+
+      if (res.ok && f.bookingMethod === "book-now") {
+        router.push("/referrals/" + res.referralId + "/book");
+        return;
+      }
 
       if (res.ok) {
         setDone({
@@ -171,13 +186,17 @@ export default function ReferralForm({
       lastName: "",
       dob: "",
       sex: "",
+      patientPhone: "",
+      patientEmail: "",
       pregnancy: "",
       scanTypeId: "",
       arch: "",
       regionOfInterest: "",
       clinicalNotes: "",
       reportChoice: "",
+      bookingMethod: "",
       signatureName: defaultSignature,
+      termsAccepted: false,
     });
     setErrors({});
     setBanner("");
@@ -334,6 +353,33 @@ export default function ReferralForm({
                   ))}
                 </div>
               </div>
+
+              <div className="rf-grid">
+                <div className="rf-field">
+                  <label>Patient mobile *</label>
+                  <input
+                    type="tel"
+                    className={errors.patientPhone ? "err" : ""}
+                    value={f.patientPhone}
+                    onChange={(e) => set("patientPhone", e.target.value)}
+                    placeholder="07700 900123"
+                  />
+                </div>
+                <div className="rf-field">
+                  <label>Patient email *</label>
+                  <input
+                    type="email"
+                    className={errors.patientEmail ? "err" : ""}
+                    value={f.patientEmail}
+                    onChange={(e) => set("patientEmail", e.target.value)}
+                    placeholder="patient@example.com"
+                  />
+                </div>
+              </div>
+              <p className="rf-help">
+                We use these to arrange the appointment and send the patient their
+                confirmation. Please check them with the patient before submitting.
+              </p>
             </section>
 
             {/* Scan */}
@@ -454,6 +500,36 @@ export default function ReferralForm({
               )}
             </section>
 
+            {/* Appointment */}
+            <section className="rf-card">
+              <h2>Appointment</h2>
+              <div className="rf-field">
+                <label>How should the appointment be arranged? *</label>
+                <div className={"rf-choice " + (errors.bookingMethod ? "err" : "")}>
+                  <button
+                    type="button"
+                    className={f.bookingMethod === "book-now" ? "on" : ""}
+                    onClick={() => set("bookingMethod", "book-now")}
+                  >
+                    <span className="rf-choice-t">Book an appointment now</span>
+                    <span className="rf-choice-s">
+                      Pick a slot yourself on the next screen.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={f.bookingMethod === "contact-patient" ? "on" : ""}
+                    onClick={() => set("bookingMethod", "contact-patient")}
+                  >
+                    <span className="rf-choice-t">We&rsquo;ll contact the patient</span>
+                    <span className="rf-choice-s">
+                      Our team rings the patient to arrange a time.
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
             {/* Confirm */}
             <section className="rf-card">
               <h2>Confirm</h2>
@@ -529,6 +605,16 @@ const styles = `
   padding:clamp(20px,4vw,30px);margin:0 0 18px;box-shadow:0 14px 40px -30px rgba(14,27,46,.35);}
 .rf-card h2{font-family:"Fraunces",Georgia,serif;font-size:20px;margin:0 0 18px;}
 
+.rf-choice{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.rf-choice button{display:flex;flex-direction:column;gap:4px;text-align:left;cursor:pointer;
+  background:rgba(247,244,236,.05);border:1px solid rgba(231,174,59,.22);border-radius:12px;
+  padding:14px 16px;color:#f7f4ec;font-family:inherit;}
+.rf-choice button:hover{background:rgba(231,174,59,.1);}
+.rf-choice button.on{border-color:#e7ae3b;background:rgba(231,174,59,.16);}
+.rf-choice.err button{border-color:#e08a7a;}
+.rf-choice-t{font-size:15px;font-weight:600;}
+.rf-choice-s{font-size:13px;color:rgba(247,244,236,.55);line-height:1.4;}
+@media(max-width:560px){.rf-choice{grid-template-columns:1fr;}}
 .rf-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:6px;}
 @media(max-width:560px){.rf-grid{grid-template-columns:1fr;}}
 .rf-field{margin-bottom:18px;}

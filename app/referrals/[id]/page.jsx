@@ -80,12 +80,15 @@ export default async function ReferralDetailPage({ params }) {
   const role = profile?.role || "dentist";
   const canUpload = role === "staff" || role === "admin";
   const canArchive = role === "staff" || role === "admin";
+  // Dentists can book their own practice's referrals (RLS enforces the practice).
+  const canBook = true;
 
   const { data: ref } = await supabase
     .from("referrals")
     .select(
-      "id, status, created_at, pregnancy, clinical_notes, region_of_interest, report_requested, signature_name, archived, archive_reason, " +
-        "patients(id, first_name, last_name, date_of_birth, sex, phone, alt_phone, email), scan_types(name,code)"
+      "id, status, created_at, pregnancy, clinical_notes, region_of_interest, report_requested, signature_name, booking_method, archived, archive_reason, " +
+        "patients(id, first_name, last_name, date_of_birth, sex, phone, alt_phone, email), scan_types(name,code), " +
+        "practices(id, name, phone, email, city, postcode)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -94,6 +97,7 @@ export default async function ReferralDetailPage({ params }) {
 
   const patient = one(ref.patients);
   const scanType = one(ref.scan_types);
+  const practice = one(ref.practices);
   const patientName = patient
     ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
     : "Patient";
@@ -166,7 +170,7 @@ export default async function ReferralDetailPage({ params }) {
               <a className="rd-appt-link" href={bookHref}>Manage booking</a>
             ) : null}
           </div>
-        ) : canUpload && (ref.status === "submitted" || ref.status === "booked") ? (
+        ) : canBook && (ref.status === "submitted" || ref.status === "booked") ? (
           <div className="rd-appt none">
             <span className="rd-appt-text">No appointment booked yet.</span>
             <a className="rd-appt-link" href={bookHref}>Book appointment</a>
@@ -201,12 +205,55 @@ export default async function ReferralDetailPage({ params }) {
               <dd>{ref.pregnancy ? ref.pregnancy.replace(/_/g, " ") : "\u2014"}</dd>
             </div>
             <div>
+              <dt>Booking</dt>
+              <dd>
+                {ref.booking_method === "book-now"
+                  ? "Dentist booked at referral"
+                  : ref.booking_method === "contact-patient"
+                  ? "Clinic to contact the patient"
+                  : "\u2014"}
+              </dd>
+            </div>
+            <div>
               <dt>Report requested</dt>
               <dd>{ref.report_requested ? "Yes" : "No"}</dd>
             </div>
             <div>
               <dt>Referred by</dt>
               <dd>{ref.signature_name || "\u2014"}</dd>
+            </div>
+            <div>
+              <dt>Practice</dt>
+              <dd>
+                {practice?.name || "\u2014"}
+                {practice && (practice.city || practice.postcode) ? (
+                  <span className="rd-sub">
+                    {[practice.city, practice.postcode].filter(Boolean).join(", ")}
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+            <div>
+              <dt>Practice phone</dt>
+              <dd>
+                {practice?.phone ? (
+                  <a className="rd-link" href={"tel:" + practice.phone.replace(/\s+/g, "")}>
+                    {practice.phone}
+                  </a>
+                ) : (
+                  <span className="rd-missing">No number on record</span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Practice email</dt>
+              <dd>
+                {practice?.email ? (
+                  <a className="rd-link" href={"mailto:" + practice.email}>{practice.email}</a>
+                ) : (
+                  <span className="rd-missing">No email on record</span>
+                )}
+              </dd>
             </div>
           </dl>
 
@@ -339,6 +386,10 @@ export default async function ReferralDetailPage({ params }) {
         .rd-opg{display:block;width:100%;height:auto;max-height:62vh;object-fit:contain;
           background:#0a1422;border:1px solid rgba(247,244,236,.1);border-radius:12px;}
         @media(max-width:560px){.rd-grid{grid-template-columns:1fr;}}
+        .rd-sub{display:block;font-size:12.5px;color:rgba(247,244,236,.45);margin-top:2px;}
+        .rd-link{color:#e7ae3b;text-decoration:none;}
+        .rd-link:hover{text-decoration:underline;}
+        .rd-missing{color:rgba(247,244,236,.35);font-style:italic;}
       `}</style>
     </main>
   );

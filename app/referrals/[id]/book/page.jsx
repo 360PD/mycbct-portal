@@ -106,6 +106,14 @@ function buildMonthCells(year, month) {
   return cells;
 }
 
+// Anyone signed in may reach the calendar and take a slot. RLS keeps a dentist
+// to their own practice's referrals — see the "dentists book own-practice
+// appointments" policy. Cancelling and moving stays staff-only, below.
+async function requireSignedIn(supabase) {
+  const { data } = await supabase.auth.getClaims();
+  return data?.claims?.sub || null;
+}
+
 async function requireStaff(supabase) {
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
@@ -125,8 +133,8 @@ export default async function BookPage({ params, searchParams }) {
   const sp = (await searchParams) || {};
 
   const supabase = await createClient();
-  const staffId = await requireStaff(supabase);
-  if (!staffId) redirect("/dashboard");
+  const viewerId = await requireSignedIn(supabase);
+  if (!viewerId) redirect("/sign-in?next=/referrals/" + id + "/book");
 
   // The referral being booked.
   const { data: ref } = await supabase
@@ -157,8 +165,8 @@ export default async function BookPage({ params, searchParams }) {
   async function bookSlot(formData) {
     "use server";
     const supabase = await createClient();
-    const staffId = await requireStaff(supabase);
-    if (!staffId) redirect("/dashboard");
+    const bookerId = await requireSignedIn(supabase);
+    if (!bookerId) redirect("/dashboard");
 
     const slotISO = String(formData.get("slot") || "");
     const day = String(formData.get("day") || "");
@@ -181,7 +189,7 @@ export default async function BookPage({ params, searchParams }) {
     const { error: insErr } = await supabase.from("appointments").insert({
       referral_id: id,
       starts_at: slotISO,
-      booked_by: staffId,
+      booked_by: bookerId,
     });
     if (insErr) {
       redirect(

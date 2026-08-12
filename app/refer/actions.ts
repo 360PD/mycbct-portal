@@ -22,6 +22,9 @@ export type ReferralInput = {
   clinicalNotes: string;
   reportRequested: boolean;
   signatureName: string;
+  patientPhone: string;
+  patientEmail: string;
+  bookingMethod: string; // "book-now" | "contact-patient"
   practiceId?: string; // staff/admin only — ignored for dentists
 };
 
@@ -114,6 +117,16 @@ export async function createReferral(
   if (!input.pregnancy) {
     return { ok: false, error: "Please answer the pregnancy question." };
   }
+  // The patient's own contact details are how we book them in, so both are required.
+  if (!input.patientPhone?.trim()) {
+    return { ok: false, error: "The patient's phone number is required." };
+  }
+  if (!input.patientEmail?.trim()) {
+    return { ok: false, error: "The patient's email address is required." };
+  }
+  if (input.bookingMethod !== "book-now" && input.bookingMethod !== "contact-patient") {
+    return { ok: false, error: "Please choose how the appointment should be arranged." };
+  }
 
   // 1) Create the patient (scoped to the referral's practice).
   const { data: patient, error: patErr } = await supabase
@@ -124,6 +137,8 @@ export async function createReferral(
       last_name: input.lastName.trim(),
       date_of_birth: input.dob || null,
       sex: input.sex || null,
+      phone: input.patientPhone.trim(),
+      email: input.patientEmail.trim(),
     })
     .select("id")
     .single();
@@ -143,6 +158,7 @@ export async function createReferral(
       clinical_notes: input.clinicalNotes?.trim() || null,
       region_of_interest: input.regionOfInterest?.trim() || null,
       report_requested: !!input.reportRequested,
+      booking_method: input.bookingMethod,
       signature_name:
         input.signatureName?.trim() || profile.full_name || null,
       status: "submitted",
