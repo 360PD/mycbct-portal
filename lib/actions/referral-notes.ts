@@ -2,6 +2,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
+// v2.1 — fixes the build. requireStaff() returned an inferred union that
+// TypeScript widened, so gate.error read as string | undefined. It now returns
+// an explicit discriminated union on `ok`.
+//
 // v2 — adds the chase state alongside the notes.
 // A referral that is waiting on somebody is in a state, not a note. The old
 // system had no field for it, so staff wrote "con 22.4" into the clinical
@@ -19,13 +23,7 @@ export type NoteResult = { ok: true } | { ok: false; error: string };
 
 const MAX_NOTE = 4000;
 
-export const CHASE_STATES = [
-  "waiting_patient",
-  "waiting_dentist",
-  "ready_to_book",
-] as const;
-
-export type ChaseState = (typeof CHASE_STATES)[number];
+const CHASE_STATES = ["waiting_patient", "waiting_dentist", "ready_to_book"];
 
 const CHASE_LABEL: Record<string, string> = {
   waiting_patient: "Waiting on the patient",
@@ -33,25 +31,33 @@ const CHASE_LABEL: Record<string, string> = {
   ready_to_book: "Ready to book",
 };
 
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+type Gate =
+  | { ok: false; error: string }
+  | { ok: true; supabase: SupabaseClient; userId: string };
+
 // Shared gate: signed in, and staff or admin.
-async function requireStaff() {
+async function requireStaff(): Promise<Gate> {
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getClaims();
   const claims = auth?.claims;
-  if (!claims) return { error: "You're not signed in." as const };
+  if (!claims) return { ok: false, error: "You're not signed in." };
+
+  const userId = claims.sub as string;
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", claims.sub as string)
+    .eq("id", userId)
     .maybeSingle();
 
   const role = profile?.role;
   if (role !== "staff" && role !== "admin") {
-    return { error: "Only the 360 Visualise team can do that." as const };
+    return { ok: false, error: "Only the 360 Visualise team can do that." };
   }
 
-  return { supabase, userId: claims.sub as string };
+  return { ok: true, supabase, userId };
 }
 
 export async function addReferralNote(
@@ -66,7 +72,7 @@ export async function addReferralNote(
   }
 
   const gate = await requireStaff();
-  if ("error" in gate) return { ok: false, error: gate.error };
+  if (!gate.ok) return { ok: false, error: gate.error };
 
   const { error } = await gate.supabase.from("referral_notes").insert({
     referral_id: referralId,
@@ -89,14 +95,13 @@ export async function setChaseState(
 ): Promise<NoteResult> {
   if (!referralId) return { ok: false, error: "Missing referral." };
 
-  const next =
-    state === null || state === "" ? null : String(state);
-  if (next !== null && !CHASE_STATES.includes(next as ChaseState)) {
+  const next = state === null || state === "" ? null : String(state);
+  if (next !== null && !CHASE_STATES.includes(next)) {
     return { ok: false, error: "That isn't a state we recognise." };
   }
 
   const gate = await requireStaff();
-  if ("error" in gate) return { ok: false, error: gate.error };
+  if (!gate.ok) return { ok: false, error: gate.error };
 
   const { data: before } = await gate.supabase
     .from("referrals")

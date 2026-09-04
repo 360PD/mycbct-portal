@@ -46,6 +46,20 @@ const DEFAULT_REPORT_FEE_PENCE = 16500;
 const DIRECTIONS_URL =
   "https://www.google.com/maps/place/360+Visualise/data=!4m2!3m1!1s0x0:0x9d119d3ce060fd51?sa=X&ved=1t:2428&ictx=111";
 
+type ScanTypeFees = {
+  base_price?: number | null;
+  report_price_pence?: number | null;
+};
+
+// Shape of the fee lookup below. Written out because the embed isn't in the
+// generated database types.
+type FeeRow = {
+  scan_fee_pence?: number | null;
+  report_fee_pence?: number | null;
+  report_requested?: boolean | null;
+  scan_types?: ScanTypeFees | ScanTypeFees[] | null;
+};
+
 type AppointmentEmailOpts = {
   to: string;
   startsAtISO: string;
@@ -77,7 +91,7 @@ export async function sendAppointmentConfirmation({
 
   try {
     const supabase = await createClient();
-    const { data: ref } = await supabase
+    const { data } = await supabase
       .from("referrals")
       .select(
         "scan_fee_pence, report_fee_pence, report_requested, " +
@@ -86,13 +100,14 @@ export async function sendAppointmentConfirmation({
       .eq("id", referralId)
       .maybeSingle();
 
+    // The generated types don't describe this embed, so name the shape once
+    // here rather than casting at every use.
+    const ref = (data as unknown as FeeRow | null) ?? null;
+
     // The embed comes back as an object or a single-item array depending on
     // how PostgREST reads the relationship. Normalise before use.
-    const rawType = (ref as Record<string, unknown> | null)?.scan_types;
-    const scanType = (Array.isArray(rawType) ? rawType[0] : rawType) as
-      | { base_price?: number | null; report_price_pence?: number | null }
-      | null
-      | undefined;
+    const rawType = ref?.scan_types;
+    const scanType = Array.isArray(rawType) ? rawType[0] : rawType;
 
     // Prefer the price stamped on the referral. Fall back to the scan type's
     // current list price, and only then to the default.
