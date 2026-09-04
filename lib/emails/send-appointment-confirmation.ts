@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { renderEmail } from "@/lib/emails/layout";
 
+// v2 — falls back to the scan type's list price when the referral has no fee
+// stamped on it. Every referral created before 4 Sept 2026 has a null
+// scan_fee_pence, which made this email quote "Scan fee £0.00, Total £0.00".
+// New referrals carry their own price (app/refer/actions.ts v6); this is the
+// safety net for the 2,244 historical rows.
+
 export function fmtAppointmentDateTimeUK(iso: string) {
   const d = new Date(iso);
   const datePart = new Intl.DateTimeFormat("en-GB", {
@@ -35,7 +41,7 @@ function fmtMoneyGBP(pence: number | null | undefined) {
   }).format(amount / 100);
 }
 
-const DEFAULT_REPORT_FEE_PENCE = 12000;
+const DEFAULT_REPORT_FEE_PENCE = 16500;
 
 const DIRECTIONS_URL =
   "https://www.google.com/maps/place/360+Visualise/data=!4m2!3m1!1s0x0:0x9d119d3ce060fd51?sa=X&ved=1t:2428&ictx=111";
@@ -73,13 +79,37 @@ export async function sendAppointmentConfirmation({
     const supabase = await createClient();
     const { data: ref } = await supabase
       .from("referrals")
-      .select("scan_fee_pence, report_fee_pence, report_requested")
+      .select(
+        "scan_fee_pence, report_fee_pence, report_requested, " +
+          "scan_types(base_price, report_price_pence)"
+      )
       .eq("id", referralId)
       .maybeSingle();
 
-    const scanPence = Number(ref?.scan_fee_pence) || 0;
-    const reportPence = Number(ref?.report_fee_pence) || DEFAULT_REPORT_FEE_PENCE;
+    // The embed comes back as an object or a single-item array depending on
+    // how PostgREST reads the relationship. Normalise before use.
+    const rawType = (ref as Record<string, unknown> | null)?.scan_types;
+    const scanType = (Array.isArray(rawType) ? rawType[0] : rawType) as
+      | { base_price?: number | null; report_price_pence?: number | null }
+      | null
+      | undefined;
+
+    // Prefer the price stamped on the referral. Fall back to the scan type's
+    // current list price, and only then to the default.
+    const scanPence =
+      Number(ref?.scan_fee_pence) || Number(scanType?.base_price) || 0;
+    const reportPence =
+      Number(ref?.report_fee_pence) ||
+      Number(scanType?.report_price_pence) ||
+      DEFAULT_REPORT_FEE_PENCE;
     const reportRequested = !!ref?.report_requested;
+
+    if (!scanPence) {
+      console.error(
+        "appointment confirmation: no scan fee found for referral",
+        referralId
+      );
+    }
 
     scanFee = fmtMoneyGBP(scanPence);
     reportFee = fmtMoneyGBP(reportPence);

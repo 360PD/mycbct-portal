@@ -6,8 +6,28 @@ import ScanViewer from "@/components/ScanViewer";
 import ArchiveButton from "@/components/ArchiveButton";
 import ShareButton from "@/components/ShareButton";
 import PatientContactEditor from "@/components/PatientContactEditor";
+import ReferralNotes from "@/components/ReferralNotes";
 
+// v4 — adds the chase state to the notes card (chase_state on referrals).
+//
+// v3 — Rachel's two referral-screen requests.
+//   1. The price is now on the referral: scan fee, report fee and total.
+//      Staff also see what the report costs us and what the margin is;
+//      the dentist sees only what they are charged.
+//   2. A running notes thread (components/ReferralNotes.jsx), staff only.
+//      The dentist's own clinical notes stay where they were, above.
+//
 // v2.4 — patient contact fields added.
+
+function money(pence) {
+  if (pence === null || pence === undefined) return null;
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(pence) / 100);
+}
 
 const STATUS_LABEL = {
   submitted: "Submitted",
@@ -87,7 +107,9 @@ export default async function ReferralDetailPage({ params }) {
     .from("referrals")
     .select(
       "id, status, created_at, pregnancy, clinical_notes, region_of_interest, report_requested, signature_name, booking_method, archived, archive_reason, " +
-        "patients(id, first_name, last_name, date_of_birth, sex, phone, alt_phone, email), scan_types(name,code), " +
+        "scan_fee_pence, report_fee_pence, report_cost_pence, total_fee_pence, report_margin_pence, chase_state, " +
+        "patients(id, first_name, last_name, date_of_birth, sex, phone, alt_phone, email), " +
+        "scan_types(name, code, base_price, report_cost_pence, report_price_pence), " +
         "practices(id, name, phone, email, city, postcode)"
     )
     .eq("id", id)
@@ -101,6 +123,42 @@ export default async function ReferralDetailPage({ params }) {
   const patientName = patient
     ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
     : "Patient";
+
+  // Fees. Referrals created from 4 Sept 2026 carry their own price. Older ones
+  // don't, so fall back to the scan type's current list price and say so.
+  const stampedScan = ref.scan_fee_pence;
+  const scanFee = stampedScan ?? scanType?.base_price ?? null;
+  const reportFee = ref.report_requested
+    ? (ref.report_fee_pence ?? scanType?.report_price_pence ?? null)
+    : null;
+  const reportCost = ref.report_requested
+    ? (ref.report_cost_pence ?? scanType?.report_cost_pence ?? null)
+    : null;
+  const totalFee =
+    scanFee === null && reportFee === null
+      ? null
+      : (scanFee || 0) + (reportFee || 0);
+  const feesEstimated = stampedScan === null || stampedScan === undefined;
+
+  // Staff notes thread — staff only, and RLS blocks the read for anyone else.
+  let noteList = [];
+  if (canUpload) {
+    const { data: notes } = await supabase
+      .from("referral_notes")
+      .select("id, body, created_at, profiles(full_name, email)")
+      .eq("referral_id", id)
+      .order("created_at", { ascending: true });
+
+    noteList = (notes || []).map((n) => {
+      const author = one(n.profiles);
+      return {
+        id: n.id,
+        body: n.body,
+        created_at: n.created_at,
+        authorName: author?.full_name || author?.email || null,
+      };
+    });
+  }
 
   const { data: appt } = await supabase
     .from("appointments")
@@ -265,6 +323,55 @@ export default async function ReferralDetailPage({ params }) {
           ) : null}
         </section>
 
+        <section className="rd-card">
+          <h2 className="rd-h2">
+            Fees
+            {feesEstimated && (
+              <span className="rd-est">estimate — priced at today&rsquo;s rates</span>
+            )}
+          </h2>
+          <dl className="rd-fees">
+            <div>
+              <dt>Scan</dt>
+              <dd>{money(scanFee) || "\u2014"}</dd>
+            </div>
+            <div>
+              <dt>Radiologist report</dt>
+              <dd>
+                {ref.report_requested
+                  ? money(reportFee) || "\u2014"
+                  : <span className="rd-missing">Not requested</span>}
+              </dd>
+            </div>
+            <div className="rd-fee-total">
+              <dt>Total to the practice</dt>
+              <dd>{money(totalFee) || "\u2014"}</dd>
+            </div>
+            {canUpload && ref.report_requested && (
+              <div className="rd-fee-cost">
+                <dt>Report cost to us / margin</dt>
+                <dd>
+                  {money(reportCost) || "\u2014"}
+                  {reportCost !== null && reportFee !== null ? (
+                    <span className="rd-sub">
+                      margin {money(reportFee - reportCost)}
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
+            )}
+          </dl>
+          <p className="rd-fee-note">Payment is taken on the day of the appointment.</p>
+        </section>
+
+        {canUpload ? (
+          <ReferralNotes
+            referralId={id}
+            notes={noteList}
+            chaseState={ref.chase_state || null}
+          />
+        ) : null}
+
         {canUpload && patient ? (
           <PatientContactEditor
             patientId={patient.id}
@@ -390,6 +497,18 @@ export default async function ReferralDetailPage({ params }) {
         .rd-link{color:#e7ae3b;text-decoration:none;}
         .rd-link:hover{text-decoration:underline;}
         .rd-missing{color:rgba(247,244,236,.35);font-style:italic;}
+        .rd-est{font-family:'DM Sans',system-ui,sans-serif;font-size:12px;font-weight:400;
+          letter-spacing:.02em;color:#e7ae3b;background:rgba(231,174,59,.14);
+          border-radius:999px;padding:4px 11px;margin-left:12px;vertical-align:middle;}
+        .rd-fees{display:grid;grid-template-columns:1fr 1fr;gap:16px 28px;margin:0;}
+        .rd-fees dt{font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+          color:rgba(247,244,236,.45);margin-bottom:4px;}
+        .rd-fees dd{margin:0;font-size:15px;}
+        .rd-fee-total dd{font-family:'Fraunces',Georgia,serif;font-size:22px;
+          font-weight:600;color:#e7ae3b;line-height:1.2;}
+        .rd-fee-cost dd{color:rgba(247,244,236,.7);}
+        .rd-fee-note{margin:18px 0 0;font-size:13px;color:rgba(247,244,236,.45);}
+        @media(max-width:560px){.rd-fees{grid-template-columns:1fr;}}
       `}</style>
     </main>
   );

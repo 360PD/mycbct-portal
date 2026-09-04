@@ -2,6 +2,16 @@ import GlobalSearch from "@/components/GlobalSearch";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
+// v9 — the action queue shows where each referral is stuck.
+// chase_state comes off the referral; "last touched" is the newest staff note.
+// A referral going quiet is now visible instead of implied.
+//
+// v8 — archived referrals leave the working lists.
+// Rachel: archiving a patient should take them out of the queues, not just
+// stamp a badge on the referral. Nothing filtered `archived` before, so an
+// archived referral stayed in the action queue and the recent list forever.
+// Both queries now exclude archived rows, and ?archived=1 shows the archive.
+//
 // v7.1 — fixes the appointment lookup on the action queue.
 // The appointments embed can be an object or an array depending on how
 // PostgREST reads the one-to-one relationship; normalise before use.
@@ -19,6 +29,12 @@ function many(v) {
   if (v) return [v];
   return [];
 }
+
+const CHASE_LABEL = {
+  waiting_patient: "Waiting on patient",
+  waiting_dentist: "Waiting on dentist",
+  ready_to_book: "Ready to book",
+};
 
 const STATUS_LABEL = {
   submitted: "Submitted",
@@ -62,7 +78,9 @@ export default async function DashboardPage({ searchParams }) {
   const q = cleanSearch(sp.q);
   const statusFilter = String(sp.status || "").trim();
   const practiceFilter = String(sp.practice || "").trim();
-  const filtering = !!(q || statusFilter || practiceFilter);
+  // ?archived=1 swaps the referrals list over to the archive.
+  const showArchived = String(sp.archived || "") === "1";
+  const filtering = !!(q || statusFilter || practiceFilter || showArchived);
 
   const supabase = await createClient();
 
@@ -113,6 +131,7 @@ export default async function DashboardPage({ searchParams }) {
         "id, status, created_at, report_requested, signature_name, " +
           "patients(first_name, last_name), scan_types(name), practices(name)"
       )
+      .eq("archived", showArchived)
       .order("created_at", { ascending: false })
       .limit(50);
 
@@ -146,16 +165,32 @@ export default async function DashboardPage({ searchParams }) {
     const { data: pending } = await supabase
       .from("referrals")
       .select(
-        "id, status, created_at, " +
+        "id, status, created_at, chase_state, " +
           "patients(first_name, last_name), scan_types(name), practices(name), scans(id), " +
           "appointments(starts_at, status)"
       )
       .in("status", ["submitted", "booked"])
+      .eq("archived", false)
       .order("created_at", { ascending: true })
       .limit(100);
 
-    queue = (pending || [])
-      .filter((r) => !many(r.scans).length)
+    const liveRows = (pending || []).filter((r) => !many(r.scans).length);
+
+    // Newest staff note per referral — how long each one has been quiet.
+    const lastNote = {};
+    if (liveRows.length) {
+      const { data: noteRows } = await supabase
+        .from("referral_notes")
+        .select("referral_id, created_at")
+        .in("referral_id", liveRows.map((r) => r.id))
+        .order("created_at", { ascending: false });
+
+      for (const n of noteRows || []) {
+        if (!lastNote[n.referral_id]) lastNote[n.referral_id] = n.created_at;
+      }
+    }
+
+    queue = liveRows
       .map((r) => {
         const pat = one(r.patients);
         const st = one(r.scan_types);
@@ -170,20 +205,27 @@ export default async function DashboardPage({ searchParams }) {
           days: d,
           urgency: d >= 7 ? "red" : d >= 3 ? "amber" : "",
           apptAt: appt ? appt.starts_at : null,
+          chase: r.chase_state || null,
+          quietDays: lastNote[r.id] ? daysWaiting(lastNote[r.id]) : null,
         };
       });
 
     const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
-    const [{ count: refsWeek }, { count: scansWeek }, practicesRes] =
+    const [{ count: refsWeek }, { count: scansWeek }, { count: archivedCount }, practicesRes] =
       await Promise.all([
         supabase
           .from("referrals")
           .select("id", { count: "exact", head: true })
+          .eq("archived", false)
           .gte("created_at", weekAgo),
         supabase
           .from("scans")
           .select("id", { count: "exact", head: true })
           .gte("uploaded_at", weekAgo),
+        supabase
+          .from("referrals")
+          .select("id", { count: "exact", head: true })
+          .eq("archived", true),
         supabase.from("practices").select("id, name").order("name"),
       ]);
 
@@ -191,14 +233,17 @@ export default async function DashboardPage({ searchParams }) {
       awaiting: queue.length,
       refsWeek: refsWeek ?? 0,
       scansWeek: scansWeek ?? 0,
+      archived: archivedCount ?? 0,
     };
     practiceOptions = practicesRes.data || [];
   }
 
   const listHeading = isStaff
-    ? filtering
-      ? "Search results"
-      : "Recent referrals"
+    ? showArchived
+      ? "Archived referrals"
+      : filtering
+        ? "Search results"
+        : "Recent referrals"
     : practiceName
       ? `Referrals at ${practiceName}`
       : "Your referrals";
@@ -231,6 +276,7 @@ export default async function DashboardPage({ searchParams }) {
         .db-new:hover{filter:brightness(1.05);}
         .db-new.ghost{background:transparent;color:#e7ae3b;border:1px solid rgba(231,174,59,.5);}
         .db-new.ghost:hover{background:rgba(231,174,59,.1);}
+        .db-new.ghost.on{background:#e7ae3b;color:#0e1b2e;border-color:#e7ae3b;}
         .db-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 0 36px;}
         .db-stat{background:rgba(247,244,236,.04);border:1px solid rgba(247,244,236,.09);
           border-radius:16px;padding:18px 20px;}
@@ -276,6 +322,12 @@ export default async function DashboardPage({ searchParams }) {
           background:rgba(247,244,236,.1);color:rgba(247,244,236,.75);}
         .db-wait.amber{background:rgba(231,174,59,.2);color:#e7ae3b;}
         .db-wait.red{background:rgba(255,110,110,.18);color:#ff9b9b;}
+        .db-chase{display:block;font-size:11.5px;font-weight:600;margin-top:4px;
+          color:#e7ae3b;}
+        .db-chase.waiting_dentist{color:#9ec9e2;}
+        .db-chase.ready_to_book{color:#36b886;}
+        .db-quiet{display:block;font-size:11.5px;color:rgba(247,244,236,.45);margin-top:4px;}
+        .db-quiet.none{color:rgba(247,244,236,.3);font-style:italic;}
         .db-book{position:relative;z-index:1;display:inline-block;background:#e7ae3b;color:#0e1b2e;
           font-weight:600;font-size:13px;text-decoration:none;padding:7px 16px;border-radius:999px;
           white-space:nowrap;justify-self:start;}
@@ -326,6 +378,12 @@ export default async function DashboardPage({ searchParams }) {
                 <a className="db-new ghost" href="/diary">Schedule</a>
                 <a className="db-new ghost" href="/diary-view">Diary</a>
                 <a className="db-new ghost" href="/practices">Practices</a>
+                <a
+                  className={"db-new ghost" + (showArchived ? " on" : "")}
+                  href={showArchived ? "/dashboard" : "/dashboard?archived=1"}
+                >
+                  Archived{stats.archived ? " (" + stats.archived + ")" : ""}
+                </a>
                 <a className="db-new ghost" href="/add-dentist">Add a dentist</a>
                 <a className="db-new" href="/refer">New referral</a>
               </div>
@@ -349,9 +407,23 @@ export default async function DashboardPage({ searchParams }) {
                     <a className="db-rowlink" href={"/referrals/" + q2.id} aria-label={"Open " + q2.patientName}></a>
                     <span className="db-pat">{q2.patientName}</span>
                     <span className="db-type">{q2.scanType}</span>
-                    <span className="db-who db-sub">{q2.practice}</span>
+                    <span className="db-who db-sub">
+                      {q2.practice}
+                      {q2.chase ? (
+                        <span className={"db-chase " + q2.chase}>{CHASE_LABEL[q2.chase]}</span>
+                      ) : null}
+                    </span>
                     <span>
                       <span className={"db-wait " + q2.urgency}>{waitLabel(q2.days)}</span>
+                      {q2.quietDays !== null ? (
+                        <span className="db-quiet">
+                          {q2.quietDays === 0
+                            ? "noted today"
+                            : "last noted " + waitLabel(q2.quietDays).toLowerCase() + " ago"}
+                        </span>
+                      ) : (
+                        <span className="db-quiet none">no notes yet</span>
+                      )}
                     </span>
                     <span className="db-when">
                       {q2.apptAt ? (
@@ -383,6 +455,7 @@ export default async function DashboardPage({ searchParams }) {
 
         {isStaff && (
           <form className="db-search" method="get" action="/dashboard">
+            {showArchived && <input type="hidden" name="archived" value="1" />}
             <input
               type="text"
               name="q"
@@ -407,7 +480,9 @@ export default async function DashboardPage({ searchParams }) {
 
         {noMatches || rows.length === 0 ? (
           <div className="db-empty">
-            {filtering ? (
+            {showArchived && !q && !statusFilter && !practiceFilter ? (
+              <p>Nothing has been archived yet. <a className="db-clear" href="/dashboard">Back to the dashboard</a></p>
+            ) : filtering ? (
               <p>No referrals match that search. <a className="db-clear" href="/dashboard">Clear filters</a></p>
             ) : (
               <>
