@@ -7,5 +7,9 @@ node_modules
 .next/
 .DS_Store
 
+# TypeScript incremental build cache — written by `tsc --noEmit`, not source
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
 # scratch folder for files awaiting deletion — never commit
 _to_delete/
