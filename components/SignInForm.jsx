@@ -17,6 +17,11 @@ import { createClient } from "@/lib/supabase/client";
  * export. Drop into the Next.js app at src/app/(auth)/sign-in/page.tsx and
  * replace the three stub handlers with the Supabase calls noted below.
  *
+ * v2.1 — the code box accepts whatever length Supabase is set to send.
+ * It was hard-coded to 6 digits; this project sends 8, so the box silently
+ * truncated the code and every attempt failed. Now 6 to 10 digits, and a
+ * wrong code no longer throws you out of the code panel.
+ *
  * v2 — emailed CODES, not emailed links.
  * Practices run corporate mail filters (Defender Safe Links and the like) that
  * open every link in an incoming email to check it is safe. Supabase sign-in
@@ -162,9 +167,10 @@ export default function SignInForm({ notice, next }) {
   // Second step of the code flow: check the six digits they typed.
   async function verifyCode() {
     const token = code.replace(/\D/g, "");
-    if (token.length !== 6) {
-      setStatus("error");
-      setMessage("Enter the 6-digit code from the email.");
+    // Supabase's code length is a project setting (6-10). Don't assume 6.
+    if (token.length < 6) {
+      setStatus("code");
+      setMessage("Enter the whole code from the email.");
       return;
     }
     setStatus("working");
@@ -179,10 +185,14 @@ export default function SignInForm({ notice, next }) {
       });
       if (error) {
         setStatus("code");
+        // Supabase says "Token has expired or is invalid" for both a wrong
+        // code and an old one, so don't claim to know which it was.
         setMessage(
-          /expired/i.test(error.message)
-            ? "That code has expired. Send a new one."
-            : "That code wasn't right. Check the email and try again."
+          /expired or is invalid/i.test(error.message)
+            ? "That code wasn't accepted. Check every digit, or send a new one."
+            : /expired/i.test(error.message)
+              ? "That code has expired. Send a new one."
+              : "That code wasn't right. Check the email and try again."
         );
         return;
       }
@@ -270,9 +280,9 @@ export default function SignInForm({ notice, next }) {
                     {mode === "password" &&
                       "Sign in to your MyCBCT portal."}
                     {mode === "magic" &&
-                      "We'll email you a 6-digit code — no password needed."}
+                      "We'll email you a code — no password needed."}
                     {mode === "reset" &&
-                      "Enter your email and we'll send a 6-digit code so you can set a new password."}
+                      "Enter your email and we'll send a code so you can set a new password."}
                   </p>
                 </header>
 
@@ -420,7 +430,7 @@ function CodePanel({
       </div>
       <h2 className="si-title">Check your inbox</h2>
       <p className="si-subtitle">
-        We&rsquo;ve emailed a 6-digit code to <strong>{email || "your email"}</strong>.
+        We&rsquo;ve emailed a code to <strong>{email || "your email"}</strong>.
         {mode === "reset"
           ? " Type it below and you can set a new password."
           : " Type it below to sign in."}
@@ -433,7 +443,7 @@ function CodePanel({
       ) : null}
 
       <div className="si-field">
-        <label htmlFor="si-code">6-digit code</label>
+        <label htmlFor="si-code">Code from the email</label>
         <input
           id="si-code"
           className="si-code"
@@ -441,10 +451,10 @@ function CodePanel({
           inputMode="numeric"
           autoComplete="one-time-code"
           autoFocus
-          maxLength={6}
-          placeholder="000000"
+          maxLength={10}
+          placeholder="Type the code"
           value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 10))}
           disabled={working}
         />
       </div>
@@ -453,7 +463,7 @@ function CodePanel({
         type="button"
         className="si-submit"
         onClick={onVerify}
-        disabled={working || code.replace(/\D/g, "").length !== 6}
+        disabled={working || code.replace(/\D/g, "").length < 6}
       >
         {working ? <span className="si-spinner" /> : "Continue"}
       </button>
@@ -860,11 +870,12 @@ const css = `
 /* ---- Sent / done panels ---- */
 .si-code {
   text-align: center;
-  font-size: 26px !important;
-  letter-spacing: 0.42em;
+  font-size: 24px !important;
+  letter-spacing: 0.3em;
   font-weight: 600;
-  text-indent: 0.42em;
+  text-indent: 0.3em;
 }
+.si-code::placeholder { font-size: 15px; letter-spacing: normal; text-indent: 0; }
 .si-sent { text-align: center; padding: 8px 0 4px; }
 .si-sent-icon {
   width: 58px; height: 58px;
