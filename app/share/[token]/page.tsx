@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { presignView } from "@/lib/backblaze";
 
+// v2 — share links actually expire now. See the note by the guard below.
+
 function fmtDate(d: string | null) {
   if (!d) return "";
   return new Date(d).toLocaleDateString("en-GB", {
@@ -33,7 +35,15 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     .eq("token", token)
     .maybeSingle();
 
-  if (!shareToken) {
+  // expires_at was read but never checked, so every share link ever created
+  // stayed live for good — including ones whose stated expiry had long passed.
+  // Found 4 Sept 2026. The page always claimed links expired; now they do.
+  const expired =
+    !!shareToken &&
+    (!shareToken.expires_at ||
+      new Date(shareToken.expires_at).getTime() <= Date.now());
+
+  if (!shareToken || expired) {
     return (
       <main className="sp">
         <div className="sp-inner sp-error">

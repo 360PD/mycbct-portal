@@ -2,12 +2,20 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ReferralForm from "@/components/ReferralForm";
 
+// v4 — the report fee comes from the scan type, not a constant.
+// REPORT_FEE_PENCE was hardcoded at 12000, so the form quoted £120 for every
+// report no matter the scan size — which is what Rachel saw after the 4 Sept
+// price change. RA-Dental charge by volume, so each scan type now carries its
+// own report price and the form reads it.
+//
 // v3.1 — staff get the practice list for the picker (plain JS).
 // Staff/admin can always open the form (their profile has no practice;
 // they choose one per referral). Dentists work exactly as before.
 // Still hides any scan type whose name contains "historical".
 
-const REPORT_FEE_PENCE = 12000;
+// Fallback only — used if a scan type somehow has no report price set.
+// The largest volume, so we never quote under cost.
+const REPORT_FEE_FALLBACK_PENCE = 16500;
 
 export default async function ReferPage() {
   const supabase = await createClient();
@@ -46,7 +54,7 @@ export default async function ReferPage() {
 
   const { data: scanTypeRows } = await supabase
     .from("scan_types")
-    .select("id, code, name, description, base_price")
+    .select("id, code, name, description, base_price, report_price_pence")
     .eq("active", true)
     .eq("is_addon", false)
     .neq("code", "ios")
@@ -62,7 +70,7 @@ export default async function ReferPage() {
       practiceName={practiceName}
       dentistName={profile?.full_name || profile?.email || ""}
       scanTypes={scanTypes}
-      reportFeePence={REPORT_FEE_PENCE}
+      reportFeePence={REPORT_FEE_FALLBACK_PENCE}
       isStaff={isStaff}
       practices={practices}
     />

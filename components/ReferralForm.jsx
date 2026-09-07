@@ -14,7 +14,10 @@ import { createReferral } from "@/app/refer/actions";
  *   practiceName : string|null
  *   dentistName  : string   — default for the signature (dentists only)
  *   scanTypes    : [{ id, code, name, description, base_price }]
- *   reportFeePence : number — consultant report fee in pence (£120.00 = 12000)
+ *   reportFeePence : number — fallback report fee in pence, used only when the
+ *                    chosen scan type has no report_price_pence of its own.
+ *                    The real price comes from scanTypes[].report_price_pence,
+ *                    because RA-Dental charge by scan volume.
  *   isStaff      : boolean  — staff/admin get the practice picker
  *   practices    : [{ id, name }] — staff only
  */
@@ -52,7 +55,7 @@ export default function ReferralForm({
   practiceName,
   dentistName = "",
   scanTypes = [],
-  reportFeePence = 12000,
+  reportFeePence = 16500,
   isStaff = false,
   practices = [],
 }) {
@@ -93,9 +96,11 @@ export default function ReferralForm({
   const reportAvailable = !!chosenScan && chosenScan.code !== "ios";
   const reportRequested = f.reportChoice === "arrange";
   const scanFeePence = chosenScan?.base_price ?? null;
+  // Priced by scan volume — a small scan's report costs less than a dual jaw.
+  const reportPence = chosenScan?.report_price_pence ?? reportFeePence;
   const totalFeePence =
     typeof scanFeePence === "number"
-      ? scanFeePence + (reportRequested ? reportFeePence : 0)
+      ? scanFeePence + (reportRequested ? reportPence : 0)
       : null;
 
   function validate() {
@@ -489,7 +494,7 @@ export default function ReferralForm({
                   {reportRequested && (
                     <p className="rf-fees-line">
                       <span>Radiologist report</span>
-                      <span>{money(reportFeePence)}</span>
+                      <span>{money(reportPence)}</span>
                     </p>
                   )}
                   <p className="rf-fees-total">
