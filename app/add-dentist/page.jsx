@@ -87,7 +87,12 @@ async function addDentist(formData) {
   }
 
   // Create the login and send the invite email in one step.
-  const redirectTo = "https://mycbct-portal.vercel.app/auth/callback?next=/auth/set-password";
+  // The live site. Set NEXT_PUBLIC_SITE_URL in Vercel; the fallback is the
+  // apex domain, never the old vercel.app staging host.
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL || "https://mycbct.co.uk"
+  ).replace(/\/$/, "");
+  const redirectTo = `${siteUrl}/auth/callback?next=/auth/set-password`;
   const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
   if (invErr || !invited?.user) {
     const msg = invErr?.message || "Could not send the invite.";

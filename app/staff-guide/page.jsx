@@ -400,7 +400,7 @@ const STAFF_GUIDE_HTML = `
         <div class="step-num">2</div>
         <div class="step-body">
           <strong>Go to the website</strong>
-          <p>Click in the address bar at the top of the screen (the long white box) and type: <strong>mycbct-portal.vercel.app</strong> — then press Enter.</p>
+          <p>Click in the address bar at the top of the screen (the long white box) and type: <strong>mycbct.co.uk</strong> — then press Enter.</p>
         </div>
       </li>
       <li class="step">
@@ -601,7 +601,7 @@ const STAFF_GUIDE_HTML = `
     <div class="quick-ref-grid">
       <div class="quick-ref-item">
         <div class="label">Website address</div>
-        <div class="value">mycbct-portal.vercel.app</div>
+        <div class="value">mycbct.co.uk</div>
       </div>
       <div class="quick-ref-item">
         <div class="label">Phone number to give patients</div>

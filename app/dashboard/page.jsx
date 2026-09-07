@@ -265,6 +265,8 @@ export default async function DashboardPage({ searchParams }) {
         .db-hi{font-family:"Fraunces",Georgia,serif;font-size:clamp(26px,4.5vw,38px);line-height:1.1;margin:0 0 8px;}
         .db-meta{color:rgba(247,244,236,.5);font-size:13px;margin:0 0 36px;}
         .db-meta b{color:#e7ae3b;font-weight:600;text-transform:capitalize;}
+        .db-pw{color:rgba(247,244,236,.6);text-decoration:underline;}
+        .db-pw:hover{color:#e7ae3b;}
         .db-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px;flex-wrap:wrap;}
         .db-head h2{font-family:"Fraunces",Georgia,serif;font-size:22px;margin:0;}
         .db-count{font-family:"DM Sans",sans-serif;font-size:14px;color:rgba(247,244,236,.5);font-weight:400;}
@@ -349,7 +351,11 @@ export default async function DashboardPage({ searchParams }) {
 
       <div className="db-wrap">
         <h1 className="db-hi">Welcome back, {name}.</h1>
-        <p className="db-meta">{email} &middot; role: <b>{role}</b></p>
+        <p className="db-meta">
+          {email} &middot; role: <b>{role}</b>
+          {" "}&middot;{" "}
+          <a className="db-pw" href="/auth/set-password">Change password</a>
+        </p>
 
         {(role === "staff" || role === "admin") && <GlobalSearch />}
 
@@ -385,6 +391,7 @@ export default async function DashboardPage({ searchParams }) {
                   Archived{stats.archived ? " (" + stats.archived + ")" : ""}
                 </a>
                 <a className="db-new ghost" href="/add-dentist">Add a dentist</a>
+                <a className="db-new ghost" href="/auth/set-password">Change password</a>
                 <a className="db-new" href="/refer">New referral</a>
               </div>
             </div>

@@ -17,13 +17,28 @@ import { createClient } from "@/lib/supabase/client";
  * export. Drop into the Next.js app at src/app/(auth)/sign-in/page.tsx and
  * replace the three stub handlers with the Supabase calls noted below.
  *
+ * v2 — emailed CODES, not emailed links.
+ * Practices run corporate mail filters (Defender Safe Links and the like) that
+ * open every link in an incoming email to check it is safe. Supabase sign-in
+ * and reset links are single use, so the scanner burned the token and the real
+ * person always got "invalid or expired". Villa Dental hit this repeatedly on
+ * 3 and 7 September 2026 — three tokens spent in ten minutes, one of them
+ * seventeen seconds after the email was sent.
+ *
+ * A six-digit code cannot be consumed by something that only fetches URLs, so
+ * both the passwordless sign-in and the password reset now email a code the
+ * person types in here.
+ *
  * Backend wiring (Supabase auth):
  *   PASSWORD  → supabase.auth.signInWithPassword({ email, password })
- *   MAGIC LINK→ supabase.auth.signInWithOtp({ email,
- *                 options: { emailRedirectTo: `${origin}/auth/callback` } })
- *   RESET     → supabase.auth.resetPasswordForEmail(email,
- *                 { redirectTo: `${origin}/auth/reset` })
- * On a successful password sign-in, redirect to /dashboard (router.push).
+ *   CODE      → supabase.auth.signInWithOtp({ email,
+ *                 options: { shouldCreateUser: false } })
+ *               then supabase.auth.verifyOtp({ email, token, type: "email" })
+ *   RESET     → the same code, then on to /auth/set-password
+ *
+ * NOTE: this only works if the Supabase "Magic Link" email template sends
+ * {{ .Token }}. A template that sends {{ .ConfirmationURL }} is a link again,
+ * and the scanners will eat it.
  * ----------------------------------------------------------------------------
  */
 
@@ -64,9 +79,10 @@ export default function SignInForm({ notice, next }) {
   const [mode, setMode] = useState("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [showPw, setShowPw] = useState(false);
 
-  // status: "idle" | "working" | "error" | "sent" | "done"
+  // status: "idle" | "working" | "error" | "code" | "done"
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
 
@@ -77,6 +93,7 @@ export default function SignInForm({ notice, next }) {
     setStatus("idle");
     setMessage("");
     setShowPw(false);
+    setCode("");
   }
 
   function validate() {
@@ -100,8 +117,6 @@ export default function SignInForm({ notice, next }) {
     setMessage("");
 
     const supabase = createClient();
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
     const dest = next || "/dashboard";
 
     try {
@@ -119,32 +134,24 @@ export default function SignInForm({ notice, next }) {
         setMessage("");
         router.push(dest);
         router.refresh();
-      } else if (mode === "magic") {
+      } else {
+        // Both "magic" and "reset" send a six-digit code. No link, so nothing
+        // for a mail scanner to open and use up before the person gets there.
         const { error } = await supabase.auth.signInWithOtp({
           email: email.trim(),
-          options: {
-            emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(dest)}`,
-          },
+          options: { shouldCreateUser: false },
         });
         if (error) {
           setStatus("error");
-          setMessage(error.message);
+          setMessage(
+            /not found|no user/i.test(error.message)
+              ? "We don't have an account for that email. Ask 360 Visualise to set you up."
+              : error.message
+          );
           return;
         }
-        setStatus("sent");
-      } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(
-          email.trim(),
-          {
-            redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/dashboard")}`,
-          }
-        );
-        if (error) {
-          setStatus("error");
-          setMessage(error.message);
-          return;
-        }
-        setStatus("sent");
+        setCode("");
+        setStatus("code");
       }
     } catch (err) {
       setStatus("error");
@@ -152,8 +159,48 @@ export default function SignInForm({ notice, next }) {
     }
   }
 
+  // Second step of the code flow: check the six digits they typed.
+  async function verifyCode() {
+    const token = code.replace(/\D/g, "");
+    if (token.length !== 6) {
+      setStatus("error");
+      setMessage("Enter the 6-digit code from the email.");
+      return;
+    }
+    setStatus("working");
+    setMessage("");
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token,
+        type: "email",
+      });
+      if (error) {
+        setStatus("code");
+        setMessage(
+          /expired/i.test(error.message)
+            ? "That code has expired. Send a new one."
+            : "That code wasn't right. Check the email and try again."
+        );
+        return;
+      }
+
+      setStatus("done");
+      // A reset goes on to choose a new password; a plain sign-in goes to work.
+      router.push(mode === "reset" ? "/auth/set-password" : next || "/dashboard");
+      router.refresh();
+    } catch {
+      setStatus("code");
+      setMessage("Something went wrong. Please try again.");
+    }
+  }
+
   function onKeyDown(e) {
-    if (e.key === "Enter") submit();
+    if (e.key !== "Enter") return;
+    if (status === "code") verifyCode();
+    else submit();
   }
 
   return (
@@ -199,12 +246,17 @@ export default function SignInForm({ notice, next }) {
               <Lockup tone="dark" />
             </div>
 
-            {status === "sent" ? (
-              <SentPanel
+            {status === "code" ? (
+              <CodePanel
                 mode={mode}
                 email={email}
-                onBack={() => switchMode("password")}
+                code={code}
+                setCode={setCode}
+                working={working}
+                message={message}
+                onVerify={verifyCode}
                 onResend={submit}
+                onBack={() => switchMode("password")}
               />
             ) : status === "done" ? (
               <DonePanel email={email} />
@@ -218,9 +270,9 @@ export default function SignInForm({ notice, next }) {
                     {mode === "password" &&
                       "Sign in to your MyCBCT portal."}
                     {mode === "magic" &&
-                      "We'll email you a one-tap sign-in link — no password needed."}
+                      "We'll email you a 6-digit code — no password needed."}
                     {mode === "reset" &&
-                      "Enter your email and we'll send a link to set a new password."}
+                      "Enter your email and we'll send a 6-digit code so you can set a new password."}
                   </p>
                 </header>
 
@@ -296,9 +348,9 @@ export default function SignInForm({ notice, next }) {
                   ) : mode === "password" ? (
                     "Sign in"
                   ) : mode === "magic" ? (
-                    "Email me a sign-in link"
+                    "Email me a code"
                   ) : (
-                    "Send reset link"
+                    "Email me a code"
                   )}
                 </button>
 
@@ -309,7 +361,7 @@ export default function SignInForm({ notice, next }) {
                       className="si-link"
                       onClick={() => switchMode("magic")}
                     >
-                      Use a sign-in link instead
+                      Email me a code instead
                     </button>
                   )}
                   {mode === "magic" && (
@@ -350,7 +402,17 @@ export default function SignInForm({ notice, next }) {
 
 /* ---------------- Sub-views ---------------- */
 
-function SentPanel({ mode, email, onBack, onResend }) {
+function CodePanel({
+  mode,
+  email,
+  code,
+  setCode,
+  working,
+  message,
+  onVerify,
+  onResend,
+  onBack,
+}) {
   return (
     <div className="si-sent">
       <div className="si-sent-icon">
@@ -358,20 +420,51 @@ function SentPanel({ mode, email, onBack, onResend }) {
       </div>
       <h2 className="si-title">Check your inbox</h2>
       <p className="si-subtitle">
+        We&rsquo;ve emailed a 6-digit code to <strong>{email || "your email"}</strong>.
         {mode === "reset"
-          ? "If an account exists for "
-          : "We've sent a sign-in link to "}
-        <strong>{email || "your email"}</strong>
-        {mode === "reset"
-          ? ", you'll get a link to set a new password."
-          : ". Tap it on this device to sign in."}
+          ? " Type it below and you can set a new password."
+          : " Type it below to sign in."}
       </p>
+
+      {message ? (
+        <div className="si-alert" role="alert" aria-live="assertive">
+          {message}
+        </div>
+      ) : null}
+
+      <div className="si-field">
+        <label htmlFor="si-code">6-digit code</label>
+        <input
+          id="si-code"
+          className="si-code"
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          autoFocus
+          maxLength={6}
+          placeholder="000000"
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          disabled={working}
+        />
+      </div>
+
+      <button
+        type="button"
+        className="si-submit"
+        onClick={onVerify}
+        disabled={working || code.replace(/\D/g, "").length !== 6}
+      >
+        {working ? <span className="si-spinner" /> : "Continue"}
+      </button>
+
       <p className="si-sent-hint">
-        It can take a minute to arrive. Check spam if you don't see it.
+        It can take a minute to arrive. Check spam if you don&rsquo;t see it.
+        The code lasts an hour.
       </p>
       <div className="si-sent-actions">
         <button type="button" className="si-link" onClick={onResend}>
-          Resend
+          Send a new code
         </button>
         <span className="si-dot-sep">·</span>
         <button type="button" className="si-link" onClick={onBack}>
@@ -765,6 +858,13 @@ const css = `
 .si-foot-dim { color: #98a2b0; font-size: 12px; letter-spacing: 0.2px; }
 
 /* ---- Sent / done panels ---- */
+.si-code {
+  text-align: center;
+  font-size: 26px !important;
+  letter-spacing: 0.42em;
+  font-weight: 600;
+  text-indent: 0.42em;
+}
 .si-sent { text-align: center; padding: 8px 0 4px; }
 .si-sent-icon {
   width: 58px; height: 58px;

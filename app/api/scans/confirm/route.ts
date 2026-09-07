@@ -54,7 +54,7 @@ async function notifyDentist(db: any, referralId: string) {
       ? [patient.first_name, patient.last_name].filter(Boolean).join(" ")
       : "your patient";
 
-    const signin = "https://mycbct-portal.vercel.app/sign-in";
+    const signin = `${(process.env.NEXT_PUBLIC_SITE_URL || "https://mycbct.co.uk").replace(/\/$/, "")}/sign-in`;
     const subject = `Scan ready: ${patientName}`;
 
     const text =

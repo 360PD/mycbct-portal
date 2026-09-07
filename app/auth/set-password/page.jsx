@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
+// v2 — this page is now also the "change your password" page for anyone
+// already signed in, not just someone arriving from an invite. Reached from
+// the dashboard, and from the sign-in code flow after a reset.
+
 export const dynamic = "force-dynamic";
 
 // Server action: runs when the invited user submits the form. They already
@@ -35,7 +39,7 @@ async function setPassword(formData) {
     redirect(
       "/sign-in?notice=" +
         encodeURIComponent(
-          "Your invite link has expired. Please ask the team to resend it."
+          "Your session has expired. Please sign in again to set a password."
         )
     );
   }
@@ -62,7 +66,7 @@ export default async function SetPasswordPage({ searchParams }) {
     redirect(
       "/sign-in?notice=" +
         encodeURIComponent(
-          "Please use the link in your invite email to set your password."
+          "Please sign in first, then you can set a new password."
         )
     );
   }
