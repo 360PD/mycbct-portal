@@ -1,3 +1,8 @@
+// v4 — every day with a free slot is now listed, closed until tapped, rather
+// than only the next fifteen times. And the three "what to expect" facts are
+// one plain bulleted panel: as separate white cards they looked like something
+// you were meant to choose between.
+//
 // v3 — the time buttons and the pay button now react the instant they're
 // pressed: the one you pressed says "Booking…", the rest go flat, and none of
 // them can be pressed twice. They also darken on hover and press in slightly.
@@ -49,7 +54,10 @@ import { PatientSlots, PayButton } from "@/components/PatientBookingButtons";
 export const dynamic = "force-dynamic";
 
 const WEEKS_AHEAD = 8;
-const MAX_SLOTS_SHOWN = 15;
+
+// A ceiling, not a target. Every free slot in the diary is offered; this only
+// stops the page growing without limit if somebody opens up months at once.
+const MAX_SLOTS_SHOWN = 400;
 
 // How much warning we insist on. A patient booking 4:25pm for 4:30pm is a
 // patient nobody is expecting. Two hours still allows same-day booking.
@@ -482,6 +490,9 @@ export default async function PatientBookPage({ params, searchParams }) {
         </>
       ) : (
         <>
+          <p className="pb-lead">
+            Tap a day to see the times we have free, then tap a time to book it.
+          </p>
           <PatientSlots action={takeSlot} days={days} />
           <p className="pb-note">
             Another time would suit you better? Ring us on{" "}
@@ -500,21 +511,26 @@ export default async function PatientBookPage({ params, searchParams }) {
 
 /* ---------------- pieces ---------------- */
 
+// One panel, plainly something to read. As three separate white cards these
+// looked like three things to choose between, and patients tried to tap them.
 function QuickFacts() {
   return (
     <div className="pb-facts">
-      <div>
-        <strong>15 minutes</strong>
-        <span>Start to finish, most of it paperwork.</span>
-      </div>
-      <div>
-        <strong>10 seconds</strong>
-        <span>The scan itself, while you stand still.</span>
-      </div>
-      <div>
-        <strong>No needles</strong>
-        <span>Nothing touches you. It doesn&rsquo;t hurt at all.</span>
-      </div>
+      <p className="pb-facts-t">What to expect</p>
+      <ul className="pb-facts-list">
+        <li>
+          <strong>About 15 minutes</strong> from arriving to leaving, and most
+          of that is paperwork.
+        </li>
+        <li>
+          <strong>The scan itself takes 10 seconds.</strong> You stand still
+          while the scanner moves around your head.
+        </li>
+        <li>
+          <strong>Nothing touches you and it doesn&rsquo;t hurt.</strong> No
+          needles, and you can go straight back to your day afterwards.
+        </li>
+      </ul>
     </div>
   );
 }
@@ -655,17 +671,41 @@ function Shell({ children }) {
         .pb-note{font-size:16px;color:#5A6B7C;margin:8px 0 0;}
         .pb-alert{background:#FBE9E7;border:2px solid #D9705F;border-radius:12px;
           padding:16px 18px;margin:0 0 20px;font-weight:600;color:#8C2F1D;}
-        .pb-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;
-          margin:24px 0 8px;}
-        .pb-facts div{background:#fff;border:1px solid #E4DCC8;border-radius:14px;
-          padding:16px 14px;text-align:center;}
-        .pb-facts strong{display:block;font-family:'Fraunces',Georgia,serif;
-          font-size:21px;margin-bottom:6px;}
-        .pb-facts span{font-size:15px;color:#5A6B7C;line-height:1.45;}
-        .pb-day{margin:0 0 22px;}
-        .pb-day-name{font-size:19px;font-weight:700;margin:0 0 10px;}
+        /* Plainly a thing to read, not a thing to choose. Flat panel, gold
+           rule down the side, ordinary bullets. */
+        .pb-facts{background:#FBF8F1;border:1px solid #E8E0D0;
+          border-left:6px solid #E0A43B;border-radius:12px;
+          padding:20px 24px;margin:24px 0 8px;}
+        .pb-facts-t{margin:0 0 12px;font-size:13px;letter-spacing:.12em;
+          text-transform:uppercase;font-weight:700;color:#A8791F;}
+        .pb-facts-list{margin:0;padding:0 0 0 22px;}
+        .pb-facts-list li{margin:0 0 10px;line-height:1.55;}
+        .pb-facts-list li:last-child{margin-bottom:0;}
+        .pb-facts-list strong{color:#12263C;}
+
+        /* One row per day, closed until tapped. Deliberately a pale row with
+           a chevron, so it can't be mistaken for a time button. */
+        .pb-days{margin:0 0 4px;}
+        .pb-daybox{background:#fff;border:1px solid #E4DCC8;border-radius:14px;
+          margin:0 0 12px;overflow:hidden;}
+        .pb-daysum{display:flex;align-items:center;gap:12px;padding:18px 20px;
+          cursor:pointer;list-style:none;font-size:20px;font-weight:700;
+          -webkit-tap-highlight-color:transparent;}
+        .pb-daysum::-webkit-details-marker{display:none;}
+        .pb-daysum:hover{background:#FBF8F1;}
+        .pb-daysum:focus-visible{outline:4px solid #E0A43B;outline-offset:-4px;}
+        .pb-dayname{flex:1;}
+        .pb-daycount{font-size:16px;font-weight:600;color:#5A6B7C;
+          white-space:nowrap;}
+        .pb-daysum::after{content:"";width:11px;height:11px;flex:none;
+          border-right:3px solid #5A6B7C;border-bottom:3px solid #5A6B7C;
+          transform:rotate(45deg) translate(-3px,-3px);
+          transition:transform .15s ease;}
+        .pb-daybox[open] .pb-daysum{border-bottom:1px solid #EFE8D8;}
+        .pb-daybox[open] .pb-daysum::after{
+          transform:rotate(-135deg) translate(-3px,-3px);}
         .pb-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));
-          gap:12px;}
+          gap:12px;padding:18px 20px 20px;}
 
         /* Buttons that answer back. Colour on hover, a press-in on tap, and a
            clear "working on it" state while the server thinks. */
@@ -723,8 +763,9 @@ function Shell({ children }) {
         @media(max-width:560px){
           .pb{font-size:18px;}
           .pb-h1{font-size:29px;}
-          .pb-facts{grid-template-columns:1fr;}
-          .pb-slots{grid-template-columns:1fr 1fr;}
+          .pb-facts{padding:18px 20px;}
+          .pb-daysum{font-size:18px;padding:16px 16px;}
+          .pb-slots{grid-template-columns:1fr 1fr;padding:16px;}
         }
       `}</style>
     </main>

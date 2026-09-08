@@ -10,6 +10,15 @@ import crypto from "node:crypto";
 // STRIPE_SECRET_KEY starts sk_test_ while testing and sk_live_ when real.
 // Nothing here changes when you switch; only the key does.
 //
+// v3 — support an Organization API key.
+//
+// Stripe now issues keys at organisation level as well as account level. An
+// organisation key doesn't know which account you mean, so every call must
+// name one: "Please include the Stripe-Context header with your target
+// account when using an Organization API key." Set STRIPE_ACCOUNT_ID to the
+// acct_... id and we send it. Leave it unset for an ordinary account key —
+// then no context is sent, which is exactly what those keys want.
+//
 // v2 — send Stripe-Version on every call.
 //
 // Stripe sets an account's default API version on its first ever API request.
@@ -34,11 +43,17 @@ function key() {
 }
 
 function headers(extra?: Record<string, string>) {
-  return {
+  const h: Record<string, string> = {
     Authorization: `Bearer ${key()}`,
     "Stripe-Version": API_VERSION,
     ...(extra || {}),
   };
+
+  // Only an organisation key needs to be told which account it's acting for.
+  const account = (process.env.STRIPE_ACCOUNT_ID || "").trim();
+  if (account) h["Stripe-Context"] = account;
+
+  return h;
 }
 
 // Stripe takes form-encoded bodies, including for nested fields.
