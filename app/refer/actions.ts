@@ -2,7 +2,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { renderEmail } from "@/lib/emails/layout";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { sendPatientBookingInvite } from "@/lib/emails/send-patient-booking-invite";
 
+// v7 — when the dentist asks us to contact the patient, the patient now gets
+// their own booking link by email instead of waiting for a phone call. The
+// link goes to /book/<token>, which needs no login. Reusable until it expires,
+// because mail filters open links to check them.
+//
 // v6 — stamps the price onto the referral when it is created.
 // Until now scan_fee_pence and report_fee_pence were never written, so the
 // patient confirmation email quoted "Scan fee £0.00, Total £0.00" on every
@@ -67,6 +74,17 @@ async function sendEmail(to: string[], subject: string, html: string) {
   } catch {
     // Swallow — notifications are best-effort by design.
   }
+}
+
+// Service-role client. Needed to mint the patient's booking token: the
+// referring dentist has no rights over patient_booking_tokens.
+function serviceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createServiceClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 function money(pence: number | null | undefined) {
@@ -285,6 +303,37 @@ export async function createReferral(
         footnote: "Questions? Reply to this email or call 360 Visualise.",
       })
     );
+  }
+
+  // 3c) The patient's own booking link, when the dentist asked us to contact
+  // them. Best-effort: a mail or token failure must never undo the referral.
+  if (input.bookingMethod === "contact-patient" && input.patientEmail?.trim()) {
+    try {
+      const svc = serviceClient();
+      if (svc) {
+        const { data: tokenRow } = await svc
+          .from("patient_booking_tokens")
+          .upsert(
+            { referral_id: referral.id },
+            { onConflict: "referral_id" }
+          )
+          .select("token")
+          .single();
+
+        if (tokenRow?.token) {
+          await sendPatientBookingInvite({
+            to: input.patientEmail.trim(),
+            bookingUrl: `${SITE_URL}/book/${tokenRow.token}`,
+            patientFirstName: input.firstName.trim(),
+            dentistName: signature,
+            practiceName: practice?.name || null,
+            scanTypeName: scanType?.name || null,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("patient booking invite failed:", e);
+    }
   }
 
   revalidatePath("/dashboard");
