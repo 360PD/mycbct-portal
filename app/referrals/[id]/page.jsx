@@ -362,7 +362,7 @@ export default async function ReferralDetailPage({ params }) {
               </dd>
             </div>
             <div className="rd-fee-total">
-              <dt>Total to the practice</dt>
+              <dt>Total</dt>
               <dd>{money(totalFee) || "\u2014"}</dd>
             </div>
             {canUpload && ref.report_requested && (
