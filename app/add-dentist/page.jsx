@@ -125,6 +125,14 @@ export default async function AddDentistPage({ searchParams }) {
   const ok = sp?.ok;
   const error = sp?.error;
 
+  // Arriving from the practice catch-up list with the details already known.
+  // Rachel works through 60-odd practices; retyping an email address she is
+  // already looking at is how typos get made.
+  const prefillEmail = typeof sp?.email === "string" ? sp.email : "";
+  const prefillName = typeof sp?.name === "string" ? sp.name : "";
+  const prefillPhone = typeof sp?.phone === "string" ? sp.phone : "";
+  const prefillPractice = typeof sp?.practice === "string" ? sp.practice : "";
+
   // Staff-only page.
   const supabase = await createClient();
   const { data: cd } = await supabase.auth.getClaims();
@@ -213,16 +221,44 @@ export default async function AddDentistPage({ searchParams }) {
 
         <form action={addDentist}>
           <label style={label}>Dentist's full name</label>
-          <input name="full_name" type="text" required placeholder="Dr Jane Smith" style={input} />
+          <input
+            name="full_name"
+            type="text"
+            required
+            placeholder="Dr Jane Smith"
+            defaultValue={prefillName}
+            style={input}
+          />
 
           <label style={label}>Email</label>
-          <input name="email" type="email" required placeholder="jane@practice.co.uk" style={input} />
+          <input
+            name="email"
+            type="email"
+            required
+            placeholder="jane@practice.co.uk"
+            defaultValue={prefillEmail}
+            style={input}
+          />
 
           <label style={label}>Phone (optional)</label>
-          <input name="phone" type="text" placeholder="01943 000000" style={input} />
+          <input
+            name="phone"
+            type="text"
+            placeholder="01943 000000"
+            defaultValue={prefillPhone}
+            style={input}
+          />
 
           <label style={label}>Practice</label>
-          <select name="practice_id" defaultValue="" style={input}>
+          <select
+            name="practice_id"
+            defaultValue={
+              practices.some((p) => p.name === prefillPractice)
+                ? practices.find((p) => p.name === prefillPractice).id
+                : ""
+            }
+            style={input}
+          >
             <option value="">— Select an existing practice —</option>
             {practices.map((p) => (
               <option key={p.id} value={p.id}>

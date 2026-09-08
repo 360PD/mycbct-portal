@@ -148,10 +148,26 @@ export default function SignInForm({ notice, next }) {
         });
         if (error) {
           setStatus("error");
+
+          // An address we don't know comes back as "Signups not allowed for
+          // otp", because shouldCreateUser is false. Shown raw that is
+          // meaningless to a dentist, and it reads as though the portal is
+          // broken — Earby Dental rang us about exactly this. Say the true
+          // thing instead, and give them somewhere to go.
+          const unknown =
+            error.code === "otp_disabled" ||
+            /signups? not allowed|not found|no user|user not found/i.test(
+              error.message || ""
+            );
+
+          const tooMany = /rate ?limit|too many/i.test(error.message || "");
+
           setMessage(
-            /not found|no user/i.test(error.message)
-              ? "We don't have an account for that email. Ask 360 Visualise to set you up."
-              : error.message
+            unknown
+              ? "We don't recognise that email address. Ring us on 01943 601222 and we'll get you set up — it takes a minute."
+              : tooMany
+                ? "That's a few codes in a row. Please wait a minute and try again."
+                : "We couldn't send a code just now. Please try again, or ring us on 01943 601222."
           );
           return;
         }
