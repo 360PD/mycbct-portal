@@ -43,12 +43,13 @@ const PRACTICES = [
   "allertonreception@carholmedentalgroup.co.uk",
   "clayton.dentalpractice@nhs.net",
   "contact@pearldentalqueensbury.co.uk",
+  // Personal address rather than a practice mailbox. Included because Pete
+  // confirmed on 8 Sept 2026 that they're known to us — an existing contact,
+  // not a scraped address.
+  "kshunjan@hotmail.co.uk",
 ];
 
-// Personal address rather than a practice mailbox — marketing rules treat a
-// sole trader as an individual, who has to have agreed first. Left out on
-// purpose. Add it below only if Pete confirms he knows them.
-const HELD_BACK = ["kshunjan@hotmail.co.uk"];
+const HELD_BACK = [];
 
 async function requireStaff(supabase) {
   const { data } = await supabase.auth.getClaims();
@@ -204,10 +205,12 @@ export default async function PracticeInvitePage({ searchParams }) {
               Prices quoted: OPG £65, small £125, single jaw £149, dual jaw £199,
               report from £105.
             </li>
-            <li>
-              <strong>{HELD_BACK.join(", ")}</strong> is held back — it&rsquo;s a
-              personal address, not a practice one.
-            </li>
+            {HELD_BACK.length ? (
+              <li>
+                <strong>{HELD_BACK.join(", ")}</strong> is held back — it&rsquo;s a
+                personal address, not a practice one.
+              </li>
+            ) : null}
           </ul>
         </div>
 
