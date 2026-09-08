@@ -21,6 +21,15 @@ type Opts = {
 
 const PHONE = "01943 601222";
 
+// "Small scan" -> "a small scan"; "OPG" -> "an OPG". Avoids "a small scan scan".
+function scanPhrase(name?: string | null) {
+  const n = String(name || "").trim();
+  if (!n) return "a CBCT scan";
+  const isAcronym = n === n.toUpperCase();
+  const shown = isAcronym ? n : n.charAt(0).toLowerCase() + n.slice(1);
+  return (/^[aeiou]/i.test(shown) ? "an " : "a ") + shown;
+}
+
 export async function sendPatientBookingInvite({
   to,
   bookingUrl,
@@ -46,8 +55,7 @@ export async function sendPatientBookingInvite({
           ? `<strong style="color:#12263C;">${referrer}</strong> has referred you`
           : "Your dentist has referred you"
       }
-      for a${scanTypeName ? ` ${scanTypeName.toLowerCase()}` : " CBCT"} scan with us
-      at 360 Visualise.
+      for ${scanPhrase(scanTypeName)} with us at 360 Visualise.
     </p>
 
     <p style="margin:0 0 24px 0;font-size:17px;line-height:1.65;">

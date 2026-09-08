@@ -1,3 +1,6 @@
+// v1.1 — fixes "a small scan scan", and refuses to offer a booking for a
+// referral that has already been scanned, delivered, invoiced or cancelled.
+//
 // v1 — the patient's own booking page. No login, no account, one screen.
 //
 // Reached from the link in the "your dentist has referred you" email, sent
@@ -56,6 +59,19 @@ function one(v) {
   return v ?? null;
 }
 
+// "Small scan" -> "a small scan"; "OPG" -> "an OPG". Avoids "a small scan scan".
+function scanPhrase(name) {
+  const n = String(name || "").trim();
+  if (!n) return "a CBCT scan";
+  const isAcronym = n === n.toUpperCase();
+  const shown = isAcronym ? n : n.charAt(0).toLowerCase() + n.slice(1);
+  return (/^[aeiou]/i.test(shown) ? "an " : "a ") + shown;
+}
+
+// Statuses where the scan has already happened or been called off. Offering a
+// booking for one of these would be wrong and confusing.
+const CLOSED_STATUSES = ["scanned", "delivered", "invoiced", "cancelled"];
+
 function money(pence) {
   if (pence === null || pence === undefined) return null;
   return new Intl.NumberFormat("en-GB", {
@@ -98,6 +114,7 @@ async function loadBooking(token) {
     .maybeSingle();
 
   if (!ref || ref.archived) return { error: "not-found" };
+  if (CLOSED_STATUSES.includes(String(ref.status))) return { error: "done" };
 
   const patient = one(ref.patients);
   const scanType = one(ref.scan_types);
@@ -164,16 +181,19 @@ export default async function PatientBookPage({ params, searchParams }) {
     const title =
       loaded.error === "expired"
         ? "This booking link has expired"
-        : loaded.error === "unavailable"
-          ? "Booking is temporarily unavailable"
-          : "We couldn't find that booking link";
+        : loaded.error === "done"
+          ? "This scan is already sorted"
+          : loaded.error === "unavailable"
+            ? "Booking is temporarily unavailable"
+            : "We couldn't find that booking link";
+    const body =
+      loaded.error === "done"
+        ? "Our records show this scan has already been done or is no longer needed. If that doesn't sound right, please give us a ring and we'll check for you."
+        : "Please give us a ring and we'll book your scan over the phone. It only takes a minute.";
     return (
       <Shell>
         <h1 className="pb-h1">{title}</h1>
-        <p className="pb-lead">
-          Please give us a ring and we&rsquo;ll book your scan over the phone.
-          It only takes a minute.
-        </p>
+        <p className="pb-lead">{body}</p>
         <CallBox />
       </Shell>
     );
@@ -294,10 +314,9 @@ export default async function PatientBookPage({ params, searchParams }) {
       <p className="pb-eyebrow">Your dentist has referred you for a scan</p>
       <h1 className="pb-h1">Hello {firstName} — let&rsquo;s book you in.</h1>
       <p className="pb-lead">
-        Your dentist has asked us to take a{" "}
-        {scanType?.name ? scanType.name.toLowerCase() : "CBCT"} scan. Pick a time
-        below that suits you. It takes one tap and there is nothing to sign up
-        for.
+        Your dentist has asked us to take {scanPhrase(scanType?.name)}. Pick a
+        time below that suits you. It takes one tap and there is nothing to sign
+        up for.
       </p>
 
       {errorNote ? <div className="pb-alert">{errorNote}</div> : null}
