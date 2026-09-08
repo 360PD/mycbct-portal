@@ -1,3 +1,9 @@
+// v2 — the patient can pay online after booking, or still pay on the day.
+// Stripe Checkout: they leave for Stripe's hosted page and come back. Card
+// details never touch this site. Paying is optional by design — an older or
+// wary patient who won't put a card in online can still just turn up and pay
+// at reception, and we'd rather have the booking than the card.
+//
 // v1.1 — fixes "a small scan scan", and refuses to offer a booking for a
 // referral that has already been scanned, delivered, invoiced or cancelled.
 //
@@ -27,6 +33,11 @@ import {
   londonToday,
 } from "@/lib/slots";
 import { sendAppointmentConfirmation } from "@/lib/emails/send-appointment-confirmation";
+import {
+  createCheckoutSession,
+  getCheckoutSession,
+  stripeConfigured,
+} from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
 
@@ -126,7 +137,14 @@ async function loadBooking(token) {
     .eq("status", "booked")
     .maybeSingle();
 
-  return { db, token: row.token, ref, patient, scanType, appt };
+  const { data: paid } = await db
+    .from("payments")
+    .select("id, status, amount_pence, paid_at")
+    .eq("referral_id", ref.id)
+    .eq("status", "paid")
+    .maybeSingle();
+
+  return { db, token: row.token, ref, patient, scanType, appt, paid };
 }
 
 // The next handful of free slots, soonest first.
@@ -174,6 +192,32 @@ export default async function PatientBookPage({ params, searchParams }) {
   const { token } = await params;
   const sp = (await searchParams) || {};
   const errorNote = sp.error ? String(sp.error) : "";
+  const returningSession = sp.session_id ? String(sp.session_id) : "";
+
+  // Coming back from Stripe. The webhook is the authority, but it can be a
+  // moment behind, so check the session here too and record it if it's paid.
+  if (returningSession) {
+    try {
+      const db0 = admin();
+      const session = await getCheckoutSession(returningSession);
+      if (db0 && session?.payment_status === "paid") {
+        await db0
+          .from("payments")
+          .update({
+            status: "paid",
+            paid_at: new Date().toISOString(),
+            stripe_payment_intent:
+              typeof session.payment_intent === "string"
+                ? session.payment_intent
+                : null,
+          })
+          .eq("stripe_session_id", session.id)
+          .neq("status", "paid");
+      }
+    } catch (e) {
+      console.error("could not confirm the returning payment:", e);
+    }
+  }
 
   const loaded = await loadBooking(token);
 
@@ -199,7 +243,7 @@ export default async function PatientBookPage({ params, searchParams }) {
     );
   }
 
-  const { db, ref, patient, scanType, appt } = loaded;
+  const { db, ref, patient, scanType, appt, paid } = loaded;
 
   // Record that somebody opened it — useful when chasing.
   await db
@@ -218,6 +262,66 @@ export default async function PatientBookPage({ params, searchParams }) {
       ? null
       : (scanFee || 0) + (reportFee || 0);
 
+  // ---------- Server action: start a payment ----------
+  async function startPayment() {
+    "use server";
+
+    const back = `/book/${token}`;
+    const fresh = await loadBooking(token);
+    if (fresh.error || !fresh.appt || fresh.paid) redirect(back);
+
+    // Work the amount out again here. Never trust a number from the browser.
+    const sFee = fresh.ref.scan_fee_pence ?? fresh.scanType?.base_price ?? 0;
+    const rFee = fresh.ref.report_requested
+      ? (fresh.ref.report_fee_pence ?? fresh.scanType?.report_price_pence ?? 0)
+      : 0;
+    const amount = Number(sFee) + Number(rFee);
+
+    if (!amount || amount < 100) {
+      redirect(
+        back + "?error=" + encodeURIComponent(
+          "We couldn't work out the fee. Please give us a ring and we'll take payment over the phone."
+        )
+      );
+    }
+
+    let url = "";
+    try {
+      const site = (
+        process.env.NEXT_PUBLIC_SITE_URL || "https://www.mycbct.co.uk"
+      ).replace(/\/$/, "");
+
+      const session = await createCheckoutSession({
+        amountPence: amount,
+        description: `CBCT scan — ${fresh.scanType?.name || "scan"}`,
+        referralId: fresh.ref.id,
+        patientEmail: fresh.patient?.email,
+        successUrl: `${site}${back}?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${site}${back}?error=${encodeURIComponent(
+          "Payment cancelled — your appointment is still booked. You can pay on the day."
+        )}`,
+      });
+
+      await fresh.db.from("payments").insert({
+        referral_id: fresh.ref.id,
+        stripe_session_id: session.id,
+        amount_pence: amount,
+        status: "pending",
+      });
+
+      url = session.url;
+    } catch (e) {
+      console.error("could not start a payment:", e);
+      redirect(
+        back + "?error=" + encodeURIComponent(
+          "We couldn't start the payment just now. Your appointment is still booked — you can pay on the day, or ring us."
+        )
+      );
+    }
+
+    redirect(url);
+  }
+
   // ---------- Already booked ----------
   if (appt) {
     return (
@@ -231,12 +335,21 @@ export default async function PatientBookPage({ params, searchParams }) {
         <p className="pb-lead">
           Thank you, {firstName}. We look forward to seeing you.
         </p>
+        {errorNote ? <div className="pb-alert">{errorNote}</div> : null}
         <WhereBox />
         <PrepBox />
-        <FeeBox scanFee={scanFee} reportFee={reportFee} total={total} />
+        <FeeBox
+          scanFee={scanFee}
+          reportFee={reportFee}
+          total={total}
+          paid={!!paid}
+          canPay={stripeConfigured() && !paid && !!total}
+          onPay={startPayment}
+        />
         <p className="pb-lead">
           Need to change or cancel? Please ring us as early as you can so we can
-          offer the time to somebody else.
+          offer the time to somebody else. If you have paid, we&rsquo;ll refund
+          you in full whenever you cancel.
         </p>
         <CallBox />
       </Shell>
@@ -425,11 +538,14 @@ function PrepBox() {
   );
 }
 
-function FeeBox({ scanFee, reportFee, total }) {
+function FeeBox({ scanFee, reportFee, total, paid, canPay, onPay }) {
   if (total === null) return null;
   return (
     <div className="pb-box">
-      <h2 className="pb-h2">What it costs</h2>
+      <h2 className="pb-h2">
+        What it costs
+        {paid ? <span className="pb-paid">Paid</span> : null}
+      </h2>
       <table className="pb-fees">
         <tbody>
           <tr>
@@ -448,9 +564,30 @@ function FeeBox({ scanFee, reportFee, total }) {
           </tr>
         </tbody>
       </table>
-      <p className="pb-note">
-        Payment is taken on the day, at reception. We take card or cash.
-      </p>
+      {paid ? (
+        <p className="pb-note">
+          Thank you — that&rsquo;s paid in full. Nothing to bring on the day.
+        </p>
+      ) : canPay ? (
+        <>
+          <form action={onPay}>
+            <button className="pb-pay" type="submit">
+              Pay now by card
+            </button>
+          </form>
+          <p className="pb-note">
+            Or pay at reception on the day — card or cash, whichever you prefer.
+            Paying now just saves you a minute when you arrive.
+          </p>
+          <p className="pb-note">
+            If you cancel, we refund you in full, however much notice you give.
+          </p>
+        </>
+      ) : (
+        <p className="pb-note">
+          Payment is taken on the day, at reception. We take card or cash.
+        </p>
+      )}
     </div>
   );
 }
@@ -526,6 +663,15 @@ function Shell({ children }) {
         .pb-fees td{padding:10px 0;border-bottom:1px solid #EFE8D8;}
         .pb-fees td:last-child{text-align:right;font-weight:700;white-space:nowrap;}
         .pb-fees-total td{border-bottom:none;font-size:22px;padding-top:14px;}
+        .pb-pay{display:block;width:100%;margin-top:16px;appearance:none;border:none;
+          cursor:pointer;font:inherit;font-size:20px;font-weight:700;
+          background:#12263C;color:#fff;border-radius:14px;padding:18px 20px;}
+        .pb-pay:hover{background:#1d3a5c;}
+        .pb-pay:focus-visible{outline:4px solid #E0A43B;outline-offset:3px;}
+        .pb-paid{margin-left:10px;font-family:'DM Sans',system-ui,sans-serif;
+          font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+          color:#1d6b4f;background:#dcefe4;border-radius:999px;padding:4px 12px;
+          vertical-align:middle;}
         .pb-call{background:#12263C;color:#F4F0E6;border-radius:16px;
           padding:24px;margin:28px 0 0;text-align:center;}
         .pb-call-t{margin:0 0 14px;font-size:20px;}
