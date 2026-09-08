@@ -1,3 +1,9 @@
+// v3 — taken slots come from booked_slot_times, not appointments.
+// A dentist can only read their own practice's appointments, so another
+// practice's booking was invisible: the slot showed as free and the clash
+// check couldn't see it either. booked_slot_times exposes the times alone —
+// no patient, no practice — so the calendar is honest for everyone.
+// The database also now refuses a second booking at the same time.
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -172,12 +178,12 @@ export default async function BookPage({ params, searchParams }) {
     const day = String(formData.get("day") || "");
     if (!slotISO) redirect(`/referrals/${id}/book`);
 
-    // Refuse a slot someone else just took.
+    // Refuse a slot someone else just took. Reads the times-only view so a
+    // booking from another practice is visible here.
     const { data: clash } = await supabase
-      .from("appointments")
-      .select("id")
+      .from("booked_slot_times")
+      .select("starts_at")
       .eq("starts_at", slotISO)
-      .eq("status", "booked")
       .maybeSingle();
     if (clash) {
       redirect(
@@ -192,9 +198,19 @@ export default async function BookPage({ params, searchParams }) {
       booked_by: bookerId,
     });
     if (insErr) {
+      // The database keeps one booking per time slot. If two people picked the
+      // same slot at once, the loser lands here — say so plainly.
+      const clashed =
+        /duplicate key|unique constraint|appointments_one_booking_per_slot/i.test(
+          insErr.message || ""
+        );
       redirect(
         `/referrals/${id}/book?day=${day}&error=` +
-          encodeURIComponent(insErr.message)
+          encodeURIComponent(
+            clashed
+              ? "That time has just been taken. Please pick another."
+              : insErr.message
+          )
       );
     }
 
@@ -286,11 +302,10 @@ export default async function BookPage({ params, searchParams }) {
 
     if (slotISOs.length > 0) {
       const { data: taken } = await supabase
-        .from("appointments")
+        .from("booked_slot_times")
         .select("starts_at")
         .gte("starts_at", slotISOs[0])
-        .lte("starts_at", slotISOs[slotISOs.length - 1])
-        .eq("status", "booked");
+        .lte("starts_at", slotISOs[slotISOs.length - 1]);
       takenSet = new Set((taken || []).map((a) => new Date(a.starts_at).toISOString()));
     }
   }
@@ -330,9 +345,8 @@ export default async function BookPage({ params, searchParams }) {
     }
 
     const { data: appts } = await supabase
-      .from("appointments")
+      .from("booked_slot_times")
       .select("starts_at")
-      .eq("status", "booked")
       .gte("starts_at", monthStart + "T00:00:00Z")
       .lte("starts_at", monthEnd + "T23:59:59Z");
     const takenAll = new Set((appts || []).map((a) => new Date(a.starts_at).toISOString()));
