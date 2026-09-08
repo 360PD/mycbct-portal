@@ -140,6 +140,22 @@ export default async function ReferralDetailPage({ params }) {
       : (scanFee || 0) + (reportFee || 0);
   const feesEstimated = stampedScan === null || stampedScan === undefined;
 
+  // Did the patient pay online? Reception needs to know before they ask
+  // somebody for money they've already handed over. Staff-only table.
+  let payment = null;
+  if (canUpload) {
+    const { data: pay } = await supabase
+      .from("payments")
+      .select("status, amount_pence, paid_at, refunded_at")
+      .eq("referral_id", id)
+      .in("status", ["paid", "refunded"])
+      .order("created_at", { ascending: false })
+      .limit(1);
+    payment = (pay || [])[0] || null;
+  }
+  const isPaid = payment?.status === "paid";
+  const isRefunded = payment?.status === "refunded";
+
   // Staff notes thread — staff only, and RLS blocks the read for anyone else.
   let noteList = [];
   if (canUpload) {
@@ -326,6 +342,8 @@ export default async function ReferralDetailPage({ params }) {
         <section className="rd-card">
           <h2 className="rd-h2">
             Fees
+            {isPaid && <span className="rd-paid">Paid online</span>}
+            {isRefunded && <span className="rd-refunded">Refunded</span>}
             {feesEstimated && (
               <span className="rd-est">estimate — priced at today&rsquo;s rates</span>
             )}
@@ -361,7 +379,23 @@ export default async function ReferralDetailPage({ params }) {
               </div>
             )}
           </dl>
-          <p className="rd-fee-note">Payment is taken on the day of the appointment.</p>
+          <p className="rd-fee-note">
+            {isPaid ? (
+              <>
+                Paid online by the patient
+                {payment?.paid_at ? " on " + fmtDate(payment.paid_at) : ""}
+                {payment?.amount_pence ? " — " + money(payment.amount_pence) : ""}. Do
+                not ask for payment on the day.
+              </>
+            ) : isRefunded ? (
+              <>
+                This payment has been refunded
+                {payment?.refunded_at ? " on " + fmtDate(payment.refunded_at) : ""}.
+              </>
+            ) : (
+              "Not paid online. Take payment at reception on the day."
+            )}
+          </p>
         </section>
 
         {canUpload ? (
@@ -500,6 +534,11 @@ export default async function ReferralDetailPage({ params }) {
         .rd-est{font-family:'DM Sans',system-ui,sans-serif;font-size:12px;font-weight:400;
           letter-spacing:.02em;color:#e7ae3b;background:rgba(231,174,59,.14);
           border-radius:999px;padding:4px 11px;margin-left:12px;vertical-align:middle;}
+        .rd-paid,.rd-refunded{font-family:'DM Sans',system-ui,sans-serif;font-size:12px;
+          font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+          border-radius:999px;padding:4px 12px;margin-left:12px;vertical-align:middle;}
+        .rd-paid{color:#0f3f2d;background:#4ecfa0;}
+        .rd-refunded{color:#f7f4ec;background:rgba(217,112,95,.85);}
         .rd-fees{display:grid;grid-template-columns:1fr 1fr;gap:16px 28px;margin:0;}
         .rd-fees dt{font-size:12px;letter-spacing:.1em;text-transform:uppercase;
           color:rgba(247,244,236,.45);margin-bottom:4px;}

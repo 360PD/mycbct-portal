@@ -129,7 +129,8 @@ export default async function DashboardPage({ searchParams }) {
       .from("referrals")
       .select(
         "id, status, created_at, report_requested, signature_name, " +
-          "patients(first_name, last_name), scan_types(name), practices(name)"
+          "patients(first_name, last_name), scan_types(name), practices(name), " +
+          "payments(status)"
       )
       .eq("archived", showArchived)
       .order("created_at", { ascending: false })
@@ -153,6 +154,9 @@ export default async function DashboardPage({ searchParams }) {
         scanType: st?.name || "—",
         practice: pr?.name || "—",
         referredBy: r.signature_name || "—",
+        // Paid online. The payments table is staff-only, so a dentist's embed
+        // comes back empty and no chip is drawn — which is what we want.
+        paid: many(r.payments).some((p) => p && p.status === "paid"),
       };
     });
   }
@@ -167,7 +171,7 @@ export default async function DashboardPage({ searchParams }) {
       .select(
         "id, status, created_at, chase_state, " +
           "patients(first_name, last_name), scan_types(name), practices(name), scans(id), " +
-          "appointments(starts_at, status)"
+          "appointments(starts_at, status), payments(status)"
       )
       .in("status", ["submitted", "booked"])
       .eq("archived", false)
@@ -205,6 +209,7 @@ export default async function DashboardPage({ searchParams }) {
           days: d,
           urgency: d >= 7 ? "red" : d >= 3 ? "amber" : "",
           apptAt: appt ? appt.starts_at : null,
+          paid: many(r.payments).some((p) => p && p.status === "paid"),
           chase: r.chase_state || null,
           quietDays: lastNote[r.id] ? daysWaiting(lastNote[r.id]) : null,
         };
@@ -315,6 +320,9 @@ export default async function DashboardPage({ searchParams }) {
         .db-row.head{background:rgba(247,244,236,.04);font-size:12px;letter-spacing:.12em;
           text-transform:uppercase;color:rgba(247,244,236,.5);font-weight:600;}
         .db-pat{font-weight:600;}
+        .db-paid{display:inline-block;margin-left:8px;font-size:10.5px;font-weight:700;
+          letter-spacing:.08em;text-transform:uppercase;color:#0f3f2d;background:#4ecfa0;
+          border-radius:999px;padding:2px 8px;vertical-align:middle;}
         .db-sub{color:rgba(247,244,236,.55);font-size:13px;}
         .db-badge{display:inline-block;font-size:12px;font-weight:600;padding:4px 11px;border-radius:999px;
           background:rgba(231,174,59,.16);color:#e7ae3b;}
@@ -412,7 +420,10 @@ export default async function DashboardPage({ searchParams }) {
                 {queue.map((q2) => (
                   <div className="db-row linked" key={q2.id}>
                     <a className="db-rowlink" href={"/referrals/" + q2.id} aria-label={"Open " + q2.patientName}></a>
-                    <span className="db-pat">{q2.patientName}</span>
+                    <span className="db-pat">
+                      {q2.patientName}
+                      {q2.paid ? <span className="db-paid">Paid</span> : null}
+                    </span>
                     <span className="db-type">{q2.scanType}</span>
                     <span className="db-who db-sub">
                       {q2.practice}
@@ -511,6 +522,7 @@ export default async function DashboardPage({ searchParams }) {
               <a className="db-row" key={r.id} href={"/referrals/" + r.id}>
                 <span>
                   <span className="db-pat">{r.patientName}</span>
+                  {r.paid ? <span className="db-paid">Paid</span> : null}
                   {r.reportRequested && <span className="db-sub"> &middot; report requested</span>}
                 </span>
                 <span className="db-type">{r.scanType}</span>
