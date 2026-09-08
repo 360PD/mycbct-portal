@@ -1,3 +1,9 @@
+// v3 — the time buttons and the pay button now react the instant they're
+// pressed: the one you pressed says "Booking…", the rest go flat, and none of
+// them can be pressed twice. They also darken on hover and press in slightly.
+// Also adds two hours' notice on the last bookable slot, so nobody can book a
+// time nobody at this end knows about yet.
+//
 // v2 — the patient can pay online after booking, or still pay on the day.
 // Stripe Checkout: they leave for Stripe's hosted page and come back. Card
 // details never touch this site. Paying is optional by design — an older or
@@ -38,11 +44,16 @@ import {
   getCheckoutSession,
   stripeConfigured,
 } from "@/lib/stripe";
+import { PatientSlots, PayButton } from "@/components/PatientBookingButtons";
 
 export const dynamic = "force-dynamic";
 
 const WEEKS_AHEAD = 8;
 const MAX_SLOTS_SHOWN = 15;
+
+// How much warning we insist on. A patient booking 4:25pm for 4:30pm is a
+// patient nobody is expecting. Two hours still allows same-day booking.
+const MIN_NOTICE_MINUTES = 120;
 
 const ADDRESS_LINES = [
   "360 Visualise",
@@ -173,14 +184,14 @@ async function loadFreeSlots(db) {
     (taken || []).map((t) => new Date(t.starts_at).toISOString())
   );
 
-  const nowMs = Date.now();
+  const earliestMs = Date.now() + MIN_NOTICE_MINUTES * 60 * 1000;
   const out = [];
   for (const day of Object.keys(byDay).sort()) {
     for (const time of buildSlotTimes(byDay[day])) {
       const iso = londonSlotISO(day, time);
       if (takenSet.has(iso)) continue;
-      // Don't offer a slot that's already been and gone today.
-      if (new Date(iso).getTime() <= nowMs) continue;
+      // Gone, or too soon for us to have got ready for them.
+      if (new Date(iso).getTime() < earliestMs) continue;
       out.push({ day, iso });
       if (out.length >= MAX_SLOTS_SHOWN) return out;
     }
@@ -372,6 +383,20 @@ export default async function PatientBookPage({ params, searchParams }) {
     if (fresh.error) redirect(back);
     if (fresh.appt) redirect(back);
 
+    // And check the notice period again — the buttons were drawn a while ago.
+    if (
+      new Date(picked).getTime() <
+      Date.now() + MIN_NOTICE_MINUTES * 60 * 1000
+    ) {
+      redirect(
+        back +
+          "?error=" +
+          encodeURIComponent(
+            "That time is a little too soon for us to get ready. Please pick a later one, or ring us and we'll squeeze you in."
+          )
+      );
+    }
+
     const { error } = await fresh.db.from("appointments").insert({
       referral_id: fresh.ref.id,
       starts_at: picked,
@@ -416,11 +441,20 @@ export default async function PatientBookPage({ params, searchParams }) {
   }
 
   // ---------- Choose a time ----------
-  const byDay = {};
+  // Formatted here, on the server, so the buttons don't depend on whatever
+  // date support the patient's phone happens to have.
+  const grouped = {};
   for (const s of slots) {
-    if (!byDay[s.day]) byDay[s.day] = [];
-    byDay[s.day].push(s);
+    if (!grouped[s.day]) grouped[s.day] = [];
+    grouped[s.day].push({ iso: s.iso, label: fmtTimeFriendly(s.iso) });
   }
+  const days = Object.keys(grouped)
+    .sort()
+    .map((day) => ({
+      day,
+      label: fmtDayFriendly(day),
+      slots: grouped[day],
+    }));
 
   return (
     <Shell>
@@ -438,7 +472,7 @@ export default async function PatientBookPage({ params, searchParams }) {
 
       <h2 className="pb-h2">Choose a time</h2>
 
-      {slots.length === 0 ? (
+      {days.length === 0 ? (
         <>
           <p className="pb-lead">
             We haven&rsquo;t any times online just at the moment. Please give us
@@ -448,21 +482,7 @@ export default async function PatientBookPage({ params, searchParams }) {
         </>
       ) : (
         <>
-          {Object.keys(byDay).map((day) => (
-            <div className="pb-day" key={day}>
-              <h3 className="pb-day-name">{fmtDayFriendly(day)}</h3>
-              <div className="pb-slots">
-                {byDay[day].map((s) => (
-                  <form action={takeSlot} key={s.iso}>
-                    <input type="hidden" name="slot" value={s.iso} />
-                    <button className="pb-slot" type="submit">
-                      {fmtTimeFriendly(s.iso)}
-                    </button>
-                  </form>
-                ))}
-              </div>
-            </div>
-          ))}
+          <PatientSlots action={takeSlot} days={days} />
           <p className="pb-note">
             Another time would suit you better? Ring us on{" "}
             <a href={"tel:" + PHONE_TEL}>{PHONE}</a> and we&rsquo;ll sort it.
@@ -570,11 +590,7 @@ function FeeBox({ scanFee, reportFee, total, paid, canPay, onPay }) {
         </p>
       ) : canPay ? (
         <>
-          <form action={onPay}>
-            <button className="pb-pay" type="submit">
-              Pay now by card
-            </button>
-          </form>
+          <PayButton action={onPay} />
           <p className="pb-note">
             Or pay at reception on the day — card or cash, whichever you prefer.
             Paying now just saves you a minute when you arrive.
@@ -650,11 +666,23 @@ function Shell({ children }) {
         .pb-day-name{font-size:19px;font-weight:700;margin:0 0 10px;}
         .pb-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));
           gap:12px;}
+
+        /* Buttons that answer back. Colour on hover, a press-in on tap, and a
+           clear "working on it" state while the server thinks. */
         .pb-slot{width:100%;appearance:none;cursor:pointer;font:inherit;
           font-size:22px;font-weight:700;padding:20px 12px;border-radius:14px;
-          background:#12263C;color:#fff;border:none;}
-        .pb-slot:hover{background:#1d3a5c;}
+          background:#12263C;color:#fff;border:2px solid #12263C;
+          -webkit-tap-highlight-color:transparent;
+          transition:background .12s ease,transform .08s ease,box-shadow .12s ease;}
+        .pb-slot:hover{background:#1D3A5C;border-color:#1D3A5C;
+          box-shadow:0 4px 14px rgba(18,38,60,.22);}
+        .pb-slot:active{transform:scale(.96);background:#0B1A2B;box-shadow:none;}
         .pb-slot:focus-visible{outline:4px solid #E0A43B;outline-offset:3px;}
+        .pb-slot:disabled{cursor:default;box-shadow:none;transform:none;
+          background:#C9D2DB;border-color:#C9D2DB;color:#6B7A88;}
+        .pb-slot.is-busy,.pb-slot.is-busy:disabled{background:#E0A43B;
+          border-color:#E0A43B;color:#12263C;font-size:19px;}
+
         .pb-box{background:#fff;border:1px solid #E4DCC8;border-radius:16px;
           padding:22px 24px;margin:28px 0 0;}
         .pb-address{margin:0 0 6px;font-size:19px;line-height:1.6;}
@@ -663,11 +691,18 @@ function Shell({ children }) {
         .pb-fees td{padding:10px 0;border-bottom:1px solid #EFE8D8;}
         .pb-fees td:last-child{text-align:right;font-weight:700;white-space:nowrap;}
         .pb-fees-total td{border-bottom:none;font-size:22px;padding-top:14px;}
-        .pb-pay{display:block;width:100%;margin-top:16px;appearance:none;border:none;
-          cursor:pointer;font:inherit;font-size:20px;font-weight:700;
-          background:#12263C;color:#fff;border-radius:14px;padding:18px 20px;}
-        .pb-pay:hover{background:#1d3a5c;}
+        .pb-pay{display:block;width:100%;margin-top:16px;appearance:none;
+          border:2px solid #12263C;cursor:pointer;font:inherit;font-size:20px;
+          font-weight:700;background:#12263C;color:#fff;border-radius:14px;
+          padding:18px 20px;-webkit-tap-highlight-color:transparent;
+          transition:background .12s ease,transform .08s ease,box-shadow .12s ease;}
+        .pb-pay:hover{background:#1D3A5C;border-color:#1D3A5C;
+          box-shadow:0 4px 14px rgba(18,38,60,.22);}
+        .pb-pay:active{transform:scale(.98);background:#0B1A2B;box-shadow:none;}
         .pb-pay:focus-visible{outline:4px solid #E0A43B;outline-offset:3px;}
+        .pb-pay:disabled{cursor:default;transform:none;box-shadow:none;}
+        .pb-pay.is-busy,.pb-pay.is-busy:disabled{background:#E0A43B;
+          border-color:#E0A43B;color:#12263C;}
         .pb-paid{margin-left:10px;font-family:'DM Sans',system-ui,sans-serif;
           font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
           color:#1d6b4f;background:#dcefe4;border-radius:999px;padding:4px 12px;
@@ -681,6 +716,10 @@ function Shell({ children }) {
         .pb-call .pb-note{color:rgba(244,240,230,.7);}
         .pb-foot{margin:40px 0 0;font-size:15px;color:#7A8794;text-align:center;
           line-height:1.7;}
+        @media(prefers-reduced-motion:reduce){
+          .pb-slot,.pb-pay{transition:background .12s ease;}
+          .pb-slot:active,.pb-pay:active{transform:none;}
+        }
         @media(max-width:560px){
           .pb{font-size:18px;}
           .pb-h1{font-size:29px;}

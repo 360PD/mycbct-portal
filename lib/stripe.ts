@@ -9,8 +9,19 @@ import crypto from "node:crypto";
 //
 // STRIPE_SECRET_KEY starts sk_test_ while testing and sk_live_ when real.
 // Nothing here changes when you switch; only the key does.
+//
+// v2 — send Stripe-Version on every call.
+//
+// Stripe sets an account's default API version on its first ever API request.
+// A brand new account that has never made one has no default, and every raw
+// REST call is rejected with "You did not provide an API version". An SDK
+// hides this by always sending the header; we send it ourselves. Pinning it
+// also means a future Stripe release can't quietly change our responses.
 
 const API = "https://api.stripe.com/v1";
+
+// Stripe's current release. Safe to leave alone; only change it deliberately.
+const API_VERSION = "2026-08-26.dahlia";
 
 export function stripeConfigured() {
   return !!process.env.STRIPE_SECRET_KEY;
@@ -20,6 +31,14 @@ function key() {
   const k = process.env.STRIPE_SECRET_KEY;
   if (!k) throw new Error("STRIPE_SECRET_KEY is not set");
   return k;
+}
+
+function headers(extra?: Record<string, string>) {
+  return {
+    Authorization: `Bearer ${key()}`,
+    "Stripe-Version": API_VERSION,
+    ...(extra || {}),
+  };
 }
 
 // Stripe takes form-encoded bodies, including for nested fields.
@@ -57,10 +76,7 @@ export async function createCheckoutSession(opts: {
 
   const res = await fetch(`${API}/checkout/sessions`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key()}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    headers: headers({ "Content-Type": "application/x-www-form-urlencoded" }),
     body,
   });
 
@@ -73,7 +89,7 @@ export async function createCheckoutSession(opts: {
 
 export async function getCheckoutSession(sessionId: string) {
   const res = await fetch(`${API}/checkout/sessions/${sessionId}`, {
-    headers: { Authorization: `Bearer ${key()}` },
+    headers: headers(),
   });
   const json = await res.json();
   if (!res.ok) {
