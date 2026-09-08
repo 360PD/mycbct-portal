@@ -510,14 +510,14 @@ export default function ReferralForm({
               <h2>Appointment</h2>
               <div className="rf-field">
                 <label>How should the appointment be arranged? *</label>
-                <div className={"rf-choice " + (errors.bookingMethod ? "err" : "")}>
+                <div className={"rf-book " + (errors.bookingMethod ? "err" : "")}>
                   <button
                     type="button"
                     className={f.bookingMethod === "book-now" ? "on" : ""}
                     onClick={() => set("bookingMethod", "book-now")}
                   >
-                    <span className="rf-choice-t">Book an appointment now</span>
-                    <span className="rf-choice-s">
+                    <span className="rf-book-t">Book an appointment now</span>
+                    <span className="rf-book-s">
                       Pick a slot yourself on the next screen.
                     </span>
                   </button>
@@ -526,9 +526,12 @@ export default function ReferralForm({
                     className={f.bookingMethod === "contact-patient" ? "on" : ""}
                     onClick={() => set("bookingMethod", "contact-patient")}
                   >
-                    <span className="rf-choice-t">We&rsquo;ll contact the patient</span>
-                    <span className="rf-choice-s">
-                      Our team rings the patient to arrange a time.
+                    <span className="rf-book-t">
+                      The patient books their own time
+                    </span>
+                    <span className="rf-book-s">
+                      We email them a link to pick a slot. If they don&rsquo;t, we
+                      ring them.
                     </span>
                   </button>
                 </div>
@@ -610,16 +613,22 @@ const styles = `
   padding:clamp(20px,4vw,30px);margin:0 0 18px;box-shadow:0 14px 40px -30px rgba(14,27,46,.35);}
 .rf-card h2{font-family:"Fraunces",Georgia,serif;font-size:20px;margin:0 0 18px;}
 
-.rf-choice{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.rf-choice button{display:flex;flex-direction:column;gap:4px;text-align:left;cursor:pointer;
-  background:rgba(247,244,236,.05);border:1px solid rgba(231,174,59,.22);border-radius:12px;
-  padding:14px 16px;color:#f7f4ec;font-family:inherit;}
-.rf-choice button:hover{background:rgba(231,174,59,.1);}
-.rf-choice button.on{border-color:#e7ae3b;background:rgba(231,174,59,.16);}
-.rf-choice.err button{border-color:#e08a7a;}
-.rf-choice-t{font-size:15px;font-weight:600;}
-.rf-choice-s{font-size:13px;color:rgba(247,244,236,.55);line-height:1.4;}
-@media(max-width:560px){.rf-choice{grid-template-columns:1fr;}}
+/* Appointment choice. These were called .rf-choice, which collided with the
+   scan-type buttons further down and left them painted in the dark theme's
+   cream text on a white card — unreadable, and easily mistaken for disabled.
+   Renamed to .rf-book and repainted to match the rest of the form. */
+.rf-book{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.rf-book button{display:flex;flex-direction:column;gap:4px;text-align:left;cursor:pointer;
+  background:#fff;border:1px solid rgba(14,27,46,.16);border-radius:13px;
+  padding:14px 16px;color:#0e1b2e;font:inherit;
+  transition:border-color .12s,box-shadow .12s;}
+.rf-book button:hover{border-color:#0e1b2e;}
+.rf-book button.on{border-color:#e7ae3b;background:#fffdf6;
+  box-shadow:0 0 0 3px rgba(231,174,59,.18);}
+.rf-book.err{outline:2px solid #f1c4bf;outline-offset:4px;border-radius:14px;}
+.rf-book-t{font-size:15px;font-weight:600;}
+.rf-book-s{font-size:12.5px;color:rgba(14,27,46,.6);line-height:1.35;}
+@media(max-width:560px){.rf-book{grid-template-columns:1fr;}}
 .rf-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:6px;}
 @media(max-width:560px){.rf-grid{grid-template-columns:1fr;}}
 .rf-field{margin-bottom:18px;}
