@@ -1,5 +1,25 @@
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { renderEmail } from "@/lib/emails/layout";
+
+// v3 — reads the fees with the service-role key.
+//
+// This ran on the signed-in user's client, which works when staff or a dentist
+// books. But a patient booking their own scan from an emailed link is not
+// signed in at all, so row-level security returned nothing and the fee lookup
+// silently produced "Scan fee £0.00". Rachel's test booking on 8 Sept 2026
+// showed £0.00 against a referral that had £149.00 stored on it.
+//
+// This is a system email about one known referral, so it reads with the
+// service key and falls back to the user client if that key is missing.
+function feeReader() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createServiceClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 // v2 — falls back to the scan type's list price when the referral has no fee
 // stamped on it. Every referral created before 4 Sept 2026 has a null
@@ -90,7 +110,7 @@ export async function sendAppointmentConfirmation({
   let totalFee = "£0.00";
 
   try {
-    const supabase = await createClient();
+    const supabase = feeReader() || (await createClient());
     const { data } = await supabase
       .from("referrals")
       .select(
@@ -122,7 +142,9 @@ export async function sendAppointmentConfirmation({
     if (!scanPence) {
       console.error(
         "appointment confirmation: no scan fee found for referral",
-        referralId
+        referralId,
+        "— row read?",
+        !!ref
       );
     }
 
